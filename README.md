@@ -14,40 +14,39 @@ Kinetix is designed to make it easy to write **software tools and automation scr
 
 ### Hello World
 
-```kix
+```
 println("Hello, world!")
 ```
 
-### Variables and Functions
+### Variables
 
-```kix
-let name = "Kinetix"
-mut counter = 0
+```
+let name = "Kinetix"       // immutable
+let pi: float = 3.14159    // explicit type
+mut counter = 0             // mutable
+counter = counter + 1
+```
+
+### Functions
+
+```
+fn add(a: int, b: int) -> int {
+    return a + b
+}
 
 fn greet(who: string) -> string {
     return "Hello, " + who + "!"
 }
 
-println(greet(name))
+println(add(3, 4))      // 7
+println(greet("World")) // Hello, World!
 ```
 
-### Loops and Control Flow
+### If / Else
 
-```kix
-// For loop with range
-for i in 0..10 {
-    println(i)
-}
-
-// While loop
-mut x = 100
-while x > 1 {
-    x = x / 2
-    println(x)
-}
-
-// Conditionals
+```
 let score = 85
+
 if score >= 90 {
     println("A")
 } else if score >= 80 {
@@ -57,67 +56,107 @@ if score >= 90 {
 }
 ```
 
-### Arrays and Iteration
+### While Loop
 
-```kix
+```
+mut x = 10
+while x > 0 {
+    println(x)
+    x = x - 1
+}
+```
+
+### For Loop (Arrays)
+
+```
 let fruits = ["apple", "banana", "cherry"]
 
 for fruit in fruits {
     println(fruit)
 }
-
-let lengths = map(fruits, fn(f) -> int { return len(f) })
-println(lengths)  // [5, 6, 6]
 ```
 
-### Classes
+### For Loop (Range)
 
-```kix
-class Vector2 {
-    pub x: float
-    pub y: float
+```
+// range(start, end) returns an array [start..end)
+for i in range(0, 10) {
+    println(i)
+}
+```
 
-    fn length() -> float {
-        return Math.sqrt(x * x + y * y)
-    }
+### Arrays & Builtins
 
-    fn add(other: Vector2) -> Vector2 {
-        return Vector2(x + other.x, y + other.y)
-    }
+```
+let nums = [5, 3, 8, 1, 9, 2]
+
+println(len(nums))      // 6
+println(min(nums))      // 1
+println(max(nums))      // 9
+
+let sorted = sort(nums)
+println(sorted)          // [1, 2, 3, 5, 8, 9]
+
+let reversed = reverse(nums)
+println(reversed)
+```
+
+### String Operations
+
+```
+let text = "Hello, Kinetix!"
+
+println(to_upper(text))              // HELLO, KINETIX!
+println(to_lower(text))              // hello, kinetix!
+println(contains(text, "Kinetix"))   // true
+println(split(text, ", "))           // ["Hello", "Kinetix!"]
+println(replace(text, "Hello", "Hi")) // Hi, Kinetix!
+println(trim("  spaces  "))         // spaces
+```
+
+### Lambda Functions
+
+```
+let double = fn(x: int) -> int {
+    return x * 2
 }
 
-let a = Vector2(3.0, 4.0)
-println(a.length())  // 5.0
+println(double(21))  // 42
 ```
 
-### File I/O and JSON
+### Math Module
 
-```kix
-// Write and read JSON
-let config = { "theme": "dark", "fontSize": 14 }
-data.write_text("config.json", json.stringify(config))
-
-let loaded = json.parse(data.read_text("config.json"))
-println(loaded["theme"])  // dark
+```
+println(Math.sqrt(144.0))        // 12.0
+println(Math.abs(-5))            // 5
+println(Math.clamp(15, 0, 10))   // 10
+println(Math.lerp(0.0, 100.0, 0.5)) // 50.0
+println(Math.sin(Math.rad(90.0)))    // 1.0
 ```
 
-### HTTP Requests
+### Multi-File Projects
 
-```kix
-let response = net.get("https://api.example.com/data")
-let data = json.parse(response)
-println(data)
+```
+// math_utils.kix
+fn square(n: int) -> int {
+    return n * n
+}
 ```
 
-### Terminal Colors (new in Build 5)
+```
+// main.kix
+#include "math_utils.kix"
 
-```kix
+println(square(7))  // 49
+```
+
+### Terminal Colors (Build 5)
+
+```
 term.clear()
 term.color_print("green", "SUCCESS: All tests passed!")
 term.color_print("red", "ERROR: Something went wrong")
-
-let styled = term.bold("important") + " and " + term.italic("elegant")
-println(styled)
+println(term.bold("important") + " and " + term.italic("elegant"))
 ```
 
 ### Interactive Shell
@@ -125,15 +164,12 @@ println(styled)
 ```bash
 $ kivm shell
 Kinetix Shell v0.0.2 build 5
-Type exit to quit, help for commands.
 
+~ ❯ println(2 + 2)
+4
 ~ ❯ ls
 ~ ❯ cd projects
-~/projects ❯ println(2 + 2)
-4
-~/projects ❯ let x = Math.sqrt(144)
-~/projects ❯ println(x)
-12
+~/projects ❯ exit
 ```
 
 ## Built-in Libraries

@@ -11,10 +11,11 @@
 println(banner("Kinetix Multi-File Demo"))
 println("")
 
-// Using math_utils functions
+// Using string_utils
 println(greet("Kinetix"))
 println("")
 
+// Using math_utils functions
 println("=== Math Utils ===")
 println("square(7)     = " + str(square(7)))
 println("cube(3)       = " + str(cube(3)))
@@ -27,13 +28,12 @@ println("fibonacci(10) = " + str(fibonacci(10)))
 println("")
 println("=== String Utils ===")
 println(greet("World"))
-println(repeat_str("🟣 ", 5))
+println(repeat_str("* ", 10))
 
 // Arrays and iteration
 println("")
 println("=== Array Demo ===")
 let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-let even_count = 0
 
 for n in numbers {
     if is_even(n) {
@@ -41,10 +41,10 @@ for n in numbers {
     }
 }
 
-// Fibonacci sequence
+// Fibonacci sequence using range()
 println("")
 println("=== Fibonacci Sequence ===")
-for i in 0..15 {
+for i in range(0, 10) {
     println("fib(" + str(i) + ") = " + str(fibonacci(i)))
 }
 

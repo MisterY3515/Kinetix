@@ -2,37 +2,41 @@
 // This file is included by main.kix via #include
 
 fn square(n: int) -> int {
-    return n * n;
+    return n * n
 }
 
 fn cube(n: int) -> int {
-    return n * n * n;
+    return n * n * n
 }
 
 fn factorial(n: int) -> int {
     if n <= 1 {
-        return 1;
+        return 1
     }
-    mut result = 1;
-    for i in 2..n {
-        result = result * i;
+    mut result = 1
+    mut i = 2
+    while i <= n {
+        result = result * i
+        i = i + 1
     }
-    return result * n;
+    return result
 }
 
 fn is_even(n: int) -> bool {
-    return n % 2 == 0;
+    return n % 2 == 0
 }
 
 fn fibonacci(n: int) -> int {
-    if n <= 0 { return 0; }
-    if n == 1 { return 1; }
-    mut a = 0;
-    mut b = 1;
-    for i in 2..n {
-        let temp = b;
-        b = a + b;
-        a = temp;
+    if n <= 0 { return 0 }
+    if n == 1 { return 1 }
+    mut a = 0
+    mut b = 1
+    mut i = 2
+    while i <= n {
+        let temp = b
+        b = a + b
+        a = temp
+        i = i + 1
     }
-    return a + b;
+    return b
 }
