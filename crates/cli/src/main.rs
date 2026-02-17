@@ -174,9 +174,12 @@ fn run() -> Result<(), String> {
             if exe {
                 // Create standalone executable
                 let output_path = output.unwrap_or_else(|| {
-                    input.with_extension("exe") // Default to .exe (even on linux/mac for now unless we detect os)
-                    // Actually, if on linux/mac, extension might be dropped.
-                    // Let's stick to user provided or input.exe for now.
+                    if cfg!(target_os = "windows") {
+                        input.with_extension("exe")
+                    } else {
+                        // On Unix, strip extension to produce a clean binary name
+                        input.with_extension("")
+                    }
                 });
 
                 // 1. Serialize bytecode to buffer
@@ -221,7 +224,7 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Version => {
-            println!("Kinetix CLI v{} build 3", env!("CARGO_PKG_VERSION"));
+            println!("Kinetix CLI v{} build 4", env!("CARGO_PKG_VERSION"));
         }
         Commands::Test { path } => {
              let mut passed = 0;

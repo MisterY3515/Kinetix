@@ -45,8 +45,10 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
              Ok(Value::Array(arr))
         },
         "copy" => {
-             // buffer copy
-             Err("Buffer copy not implemented yet".into())
+             let src = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected src path")?;
+             let dst = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected dst path")?;
+             fs::copy(src, dst).map_err(|e| e.to_string())?;
+             Ok(Value::Null)
         },
 
         // --- JSON ---
@@ -56,8 +58,9 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             convert_json_to_value(v)
         },
         "json.stringify" => {
-             // Conversion logic required Value -> JSON
-             Err("json.stringify not implemented yet".into())
+             let val = args.first().ok_or("Expected value to stringify")?;
+             let json_val = convert_value_to_json(val);
+             Ok(Value::Str(json_val.to_string()))
         },
 
         // --- CSV ---
@@ -72,6 +75,20 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
                  rows.push(Value::Array(row));
              }
              Ok(Value::Array(rows))
+        },
+        "csv.write" => {
+             let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path")?;
+             let rows = args.get(1).and_then(|v| match v { Value::Array(a) => Some(a), _ => None }).ok_or("Expected array of rows")?;
+             
+             let mut wtr = csv::Writer::from_path(path).map_err(|e| e.to_string())?;
+             for row_val in rows {
+                 if let Value::Array(cols) = row_val {
+                     let record: Vec<String> = cols.iter().map(|v| format!("{}", v)).collect();
+                     wtr.write_record(&record).map_err(|e| e.to_string())?;
+                 }
+             }
+             wtr.flush().map_err(|e| e.to_string())?;
+             Ok(Value::Null)
         },
 
         _ => Err(format!("Unknown data function: {}", name))
@@ -98,5 +115,26 @@ fn convert_json_to_value(v: serde_json::Value) -> Result<Value, String> {
              }
              Ok(Value::Map(map))
         }
+    }
+}
+
+fn convert_value_to_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(b) => serde_json::Value::Bool(*b),
+        Value::Int(n) => serde_json::Value::Number((*n).into()),
+        Value::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::Array(a) => {
+            serde_json::Value::Array(a.iter().map(convert_value_to_json).collect())
+        },
+        Value::Map(m) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in m {
+                map.insert(k.clone(), convert_value_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        },
+        _ => serde_json::Value::String(format!("{}", v)), // Fallback for functions etc
     }
 }
