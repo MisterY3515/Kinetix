@@ -1,6 +1,6 @@
 # Kinetix
 
-A next-generation programming language designed to bridge the gap between Python's readability and C++'s performance.
+Kinetix is a sperimental compiled and interpretated language made in Rust for experimental purposes with help of AI made by me, [MisterY3515](https://github.com/MisterY3515) as student.
 
 ## Crates
 
@@ -27,4 +27,4 @@ kivm exec script.kix
 
 ## License
 
-MIT
+See [LICENSE](LICENSE).
