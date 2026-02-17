@@ -1,0 +1,52 @@
+// main.kix — Multi-file project entry point
+// Compile: kivm compile -i examples/multifile/main.kix -o examples/multifile/app.exki
+// Run:     kivm run examples/multifile/app.exki
+// Or:      kivm exec examples/multifile/main.kix
+
+#include "math_utils.kix"
+#include "string_utils.kix"
+
+// ── Main Program ──
+
+println(banner("Kinetix Multi-File Demo"))
+println("")
+
+// Using math_utils functions
+println(greet("Kinetix"))
+println("")
+
+println("=== Math Utils ===")
+println("square(7)     = " + str(square(7)))
+println("cube(3)       = " + str(cube(3)))
+println("factorial(6)  = " + str(factorial(6)))
+println("is_even(42)   = " + str(is_even(42)))
+println("is_even(17)   = " + str(is_even(17)))
+println("fibonacci(10) = " + str(fibonacci(10)))
+
+// Using string_utils
+println("")
+println("=== String Utils ===")
+println(greet("World"))
+println(repeat_str("🟣 ", 5))
+
+// Arrays and iteration
+println("")
+println("=== Array Demo ===")
+let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let even_count = 0
+
+for n in numbers {
+    if is_even(n) {
+        println(str(n) + " is even")
+    }
+}
+
+// Fibonacci sequence
+println("")
+println("=== Fibonacci Sequence ===")
+for i in 0..15 {
+    println("fib(" + str(i) + ") = " + str(fibonacci(i)))
+}
+
+println("")
+println("Done!")

@@ -871,4 +871,113 @@ mod tests {
             _ => panic!("Expected let"),
         }
     }
+
+    /// Parser speed benchmark.
+    /// Run with: cargo test -p kinetix-language bench_parser_speed -- --nocapture
+    #[test]
+    fn bench_parser_speed() {
+        // Generate a large synthetic Kinetix source file
+        let mut source = String::with_capacity(500_000);
+
+        // Add 500 variable declarations
+        for i in 0..500 {
+            source.push_str(&format!("let var_{} = {};\n", i, i * 7 + 3));
+        }
+
+        // Add 200 function declarations
+        for i in 0..200 {
+            source.push_str(&format!(
+                "fn func_{}(a: int, b: int) -> int {{\n  let result = a + b * {};\n  return result;\n}}\n",
+                i, i
+            ));
+        }
+
+        // Add 50 class declarations
+        for i in 0..50 {
+            source.push_str(&format!(
+                "class Entity_{} {{\n  pub x: float\n  pub y: float\n  fn update() {{ let dx = x + {}; }}\n}}\n",
+                i, i
+            ));
+        }
+
+        // Add 200 for loops
+        for i in 0..200 {
+            source.push_str(&format!(
+                "for i in 0..{} {{\n  let tmp = i * {};\n}}\n",
+                i + 10, i + 1
+            ));
+        }
+
+        // Add 200 while loops
+        for i in 0..200 {
+            source.push_str(&format!(
+                "mut w_{} = {};\nwhile w_{} > 0 {{\n  w_{} = w_{} - 1;\n}}\n",
+                i, i * 5, i, i, i
+            ));
+        }
+
+        // Add 500 expression statements (function calls, math)
+        for i in 0..500 {
+            source.push_str(&format!("println({} + {} * {});\n", i, i + 1, i + 2));
+        }
+
+        // Add 100 if/else blocks
+        for i in 0..100 {
+            source.push_str(&format!(
+                "if {} > {} {{ let yes = true; }} else {{ let no = false; }}\n",
+                i * 2, i
+            ));
+        }
+
+        // Add 100 array literals
+        for i in 0..100 {
+            source.push_str(&format!(
+                "let arr_{} = [{}, {}, {}, {}, {}];\n",
+                i, i, i + 1, i + 2, i + 3, i + 4
+            ));
+        }
+
+        let line_count = source.lines().count();
+        let byte_count = source.len();
+
+        println!("\n══════════════════════════════════════════");
+        println!("  Parser Speed Benchmark");
+        println!("══════════════════════════════════════════");
+        println!("  Source: {} lines, {} bytes ({:.1} KB)",
+            line_count, byte_count, byte_count as f64 / 1024.0);
+
+        // Warm up
+        for _ in 0..3 {
+            let l = Lexer::new(&source);
+            let mut p = Parser::new(l);
+            let _ = p.parse_program();
+        }
+
+        // Benchmark: 10 iterations
+        let iterations = 10;
+        let start = std::time::Instant::now();
+        let mut stmts = 0;
+
+        for _ in 0..iterations {
+            let l = Lexer::new(&source);
+            let mut p = Parser::new(l);
+            let prog = p.parse_program();
+            assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
+            stmts = prog.statements.len();
+        }
+
+        let elapsed = start.elapsed();
+        let avg = elapsed / iterations;
+        let lines_per_sec = (line_count as f64 / avg.as_secs_f64()) as u64;
+        let bytes_per_sec = (byte_count as f64 / avg.as_secs_f64()) as u64;
+
+        println!("  Statements: {}", stmts);
+        println!("  Iterations: {}", iterations);
+        println!("──────────────────────────────────────────");
+        println!("  Total time:  {:.2?}", elapsed);
+        println!("  Average:     {:.2?} per parse", avg);
+        println!("  Throughput:  {} lines/sec", lines_per_sec);
+        println!("  Throughput:  {:.1} MB/sec", bytes_per_sec as f64 / 1_048_576.0);
+        println!("══════════════════════════════════════════\n");
+    }
 }

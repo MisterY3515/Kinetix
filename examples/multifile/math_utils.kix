@@ -1,0 +1,38 @@
+// math_utils.kix — Math utility functions
+// This file is included by main.kix via #include
+
+fn square(n: int) -> int {
+    return n * n;
+}
+
+fn cube(n: int) -> int {
+    return n * n * n;
+}
+
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1;
+    }
+    mut result = 1;
+    for i in 2..n {
+        result = result * i;
+    }
+    return result * n;
+}
+
+fn is_even(n: int) -> bool {
+    return n % 2 == 0;
+}
+
+fn fibonacci(n: int) -> int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
+    mut a = 0;
+    mut b = 1;
+    for i in 2..n {
+        let temp = b;
+        b = a + b;
+        a = temp;
+    }
+    return a + b;
+}

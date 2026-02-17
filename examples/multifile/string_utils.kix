@@ -1,0 +1,19 @@
+// string_utils.kix — String helper functions
+// This file is included by main.kix via #include
+
+fn greet(name: string) -> string {
+    return "Hello, " + name + "!"
+}
+
+fn repeat_str(text: string, times: int) -> string {
+    mut result = ""
+    for i in 0..times {
+        result = result + text
+    }
+    return result
+}
+
+fn banner(title: string) -> string {
+    let line = repeat_str("=", len(title) + 4)
+    return line + "\n  " + title + "\n" + line
+}

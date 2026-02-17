@@ -51,6 +51,11 @@ enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Start an interactive Kinetix shell (terminal)
+    Shell,
+    /// Open the Kinetix documentation in the browser
+    #[command(alias = "documentation")]
+    Docs,
 }
 
 fn main() {
@@ -224,7 +229,13 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Version => {
-            println!("Kinetix CLI v{} build 4", env!("CARGO_PKG_VERSION"));
+            println!("Kinetix CLI v{} build 5", env!("CARGO_PKG_VERSION"));
+        }
+        Commands::Shell => {
+            run_shell();
+        }
+        Commands::Docs => {
+            open_docs()?;
         }
         Commands::Test { path } => {
              let mut passed = 0;
@@ -338,4 +349,191 @@ fn preprocess_includes(source: &str, base_path: &Path) -> Result<String, String>
         }
     }
     Ok(result)
+}
+
+/// Interactive Kinetix Shell — a terminal REPL with bash-like commands + Kinetix expressions.
+fn run_shell() {
+    use kinetix_kicomp::compiler::Compiler;
+
+    println!("\x1b[1;35mKinetix Shell\x1b[0m v{} build 5", env!("CARGO_PKG_VERSION"));
+    println!("Type \x1b[36mexit\x1b[0m to quit, \x1b[36mhelp\x1b[0m for commands.\n");
+
+    let mut line_buf = String::new();
+
+    loop {
+        // Prompt: show current dir
+        let cwd = std::env::current_dir()
+            .map(|p| {
+                let s = p.to_string_lossy().to_string();
+                // Shorten home dir
+                if let Ok(home) = std::env::var("HOME").or(std::env::var("USERPROFILE")) {
+                    if s.starts_with(&home) {
+                        return format!("~{}", &s[home.len()..]);
+                    }
+                }
+                s
+            })
+            .unwrap_or_else(|_| "?".into());
+
+        print!("\x1b[1;34m{}\x1b[0m \x1b[1;33m❯\x1b[0m ", cwd);
+        std::io::stdout().flush().ok();
+
+        line_buf.clear();
+        if std::io::stdin().read_line(&mut line_buf).is_err() {
+            break;
+        }
+
+        let input = line_buf.trim();
+        if input.is_empty() { continue; }
+
+        // Exit
+        if input == "exit" || input == "quit" {
+            println!("Bye!");
+            break;
+        }
+
+        // Help
+        if input == "help" {
+            println!("\x1b[1mBuilt-in commands:\x1b[0m");
+            println!("  ls [dir]          List directory contents");
+            println!("  cd [dir]          Change directory");
+            println!("  pwd               Print working directory");
+            println!("  cat <file>        Show file contents");
+            println!("  head <file> [n]   Show first n lines");
+            println!("  tail <file> [n]   Show last n lines");
+            println!("  mkdir <dir>       Create directory");
+            println!("  touch <file>      Create empty file");
+            println!("  rm <path>         Remove file or directory");
+            println!("  cp <src> <dst>    Copy file");
+            println!("  mv <src> <dst>    Move/rename file");
+            println!("  echo <text>       Print text");
+            println!("  grep <pat> <file> Search in file");
+            println!("  wc <file>         Word/line/byte count");
+            println!("  which <cmd>       Find command in PATH");
+            println!("  whoami            Current user name");
+            println!("  clear             Clear screen");
+            println!("  env               Show environment variables");
+            println!("  kivm <args>       Run kivm subcommands");
+            println!("  exit              Exit shell");
+            println!("\n  Anything else is evaluated as a Kinetix expression.");
+            continue;
+        }
+
+        // Parse command and arguments
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let cmd = parts[0];
+        let cmd_args: Vec<kinetix_kivm::vm::Value> = parts[1..]
+            .iter()
+            .map(|s| kinetix_kivm::vm::Value::Str(s.to_string()))
+            .collect();
+
+        // Try bash-like commands first
+        match cmd {
+            "ls" | "cd" | "pwd" | "cat" | "mkdir" | "rm" | "cp" | "mv" |
+            "echo" | "touch" | "which" | "whoami" | "clear" | "env" |
+            "head" | "tail" | "wc" | "grep" => {
+                match kinetix_kivm::builtins::modules::term::call(cmd, &cmd_args) {
+                    Ok(kinetix_kivm::vm::Value::Null) => {},
+                    Ok(val) => println!("{}", val),
+                    Err(e) => eprintln!("\x1b[31m{}\x1b[0m", e),
+                }
+            }
+            "kivm" => {
+                // Forward to a child process
+                let child_args: Vec<&str> = parts[1..].to_vec();
+                let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("kivm"));
+                match std::process::Command::new(&exe).args(&child_args).status() {
+                    Ok(status) => {
+                        if !status.success() {
+                            if let Some(code) = status.code() {
+                                eprintln!("kivm exited with code {}", code);
+                            }
+                        }
+                    }
+                    Err(e) => eprintln!("\x1b[31mFailed to run kivm: {}\x1b[0m", e),
+                }
+            }
+            _ => {
+                // Try to evaluate as Kinetix source
+                let source = input.to_string();
+                let lexer = kinetix_language::lexer::Lexer::new(&source);
+                let mut parser = kinetix_language::parser::Parser::new(lexer);
+                let ast = parser.parse_program();
+
+                if !parser.errors.is_empty() {
+                    // Not valid Kinetix — try as system command
+                    match std::process::Command::new(cmd)
+                        .args(&parts[1..])
+                        .status()
+                    {
+                        Ok(status) => {
+                            if !status.success() {
+                                if let Some(code) = status.code() {
+                                    eprintln!("Process exited with code {}", code);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            eprintln!("\x1b[31mUnknown command: {}\x1b[0m", cmd);
+                        }
+                    }
+                } else {
+                    let mut compiler = Compiler::new();
+                    match compiler.compile(&ast.statements) {
+                        Ok(compiled) => {
+                            let mut vm = VM::new(compiled.clone());
+                            if let Err(e) = vm.run() {
+                                eprintln!("\x1b[31mRuntime error: {}\x1b[0m", e);
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mCompilation error: {}\x1b[0m", e),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Open the installed documentation in the default browser.
+fn open_docs() -> Result<(), String> {
+    let docs_path = if let Some(dirs) = directories::BaseDirs::new() {
+        dirs.home_dir().join(".kinetix").join("docs").join("index.html")
+    } else {
+        return Err("Cannot determine home directory".into());
+    };
+
+    if !docs_path.exists() {
+        return Err(format!(
+            "Documentation not found at {}.\nInstall it via the Kinetix Installer (enable 'Documentation').",
+            docs_path.display()
+        ));
+    }
+
+    // Open in default browser
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &docs_path.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&docs_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&docs_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+    }
+
+    println!("Opening documentation: {}", docs_path.display());
+    Ok(())
 }

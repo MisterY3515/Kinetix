@@ -13,3 +13,4 @@ kinetix-kicomp = { path = "../kicomp" }
 kinetix-kivm = { path = "../kivm" }
 serde_json = "1.0"
 clap = { version = "4.4", features = ["derive"] }
+directories = "5"

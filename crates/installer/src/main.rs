@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -7,7 +9,7 @@ use winreg::enums::*;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
-// Embed release binaries (platform-specific names)
+// ─── Embedded binaries ─────────────────────────────────────────────────────
 #[cfg(target_os = "windows")]
 const CLI_BYTES: &[u8] = include_bytes!("../../../target/release/kivm.exe");
 #[cfg(target_os = "windows")]
@@ -18,6 +20,13 @@ const CLI_BYTES: &[u8] = include_bytes!("../../../target/release/kivm");
 #[cfg(not(target_os = "windows"))]
 const KICOMP_BYTES: &[u8] = include_bytes!("../../../target/release/kicomp");
 
+// ─── Embedded assets ───────────────────────────────────────────────────────
+const ICON_BYTES: &[u8] = include_bytes!("../../../assets/logo/KiFile.png");
+
+// NOTE: Documentation is embedded via build_installer script which creates
+// a docs.tar file. If it doesn't exist at compile time, docs won't be available.
+// For now, docs are copied from the Documentation/ folder by the installer build script.
+
 fn cli_filename() -> &'static str {
     if cfg!(target_os = "windows") { "kivm.exe" } else { "kivm" }
 }
@@ -26,62 +35,51 @@ fn kicomp_filename() -> &'static str {
     if cfg!(target_os = "windows") { "kicomp.exe" } else { "kicomp" }
 }
 
-// ─── Theme colors ──────────────────────────────────────────────────────────
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(108, 99, 255);    // #6c63ff
+// ─── Theme ─────────────────────────────────────────────────────────────────
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(108, 99, 255);
 const ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(130, 122, 255);
 const ACCENT_DIM: egui::Color32 = egui::Color32::from_rgb(78, 71, 200);
-const BG_DARK: egui::Color32 = egui::Color32::from_rgb(18, 18, 30);     // #12121e
-const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(26, 26, 46);    // #1a1a2e
-const BG_CARD: egui::Color32 = egui::Color32::from_rgb(35, 35, 58);     // #23233a
+const BG_DARK: egui::Color32 = egui::Color32::from_rgb(18, 18, 30);
+const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(26, 26, 46);
+const BG_CARD: egui::Color32 = egui::Color32::from_rgb(35, 35, 58);
 const TEXT_PRIMARY: egui::Color32 = egui::Color32::from_rgb(230, 230, 240);
 const TEXT_SECONDARY: egui::Color32 = egui::Color32::from_rgb(140, 140, 165);
 const TEXT_DIM: egui::Color32 = egui::Color32::from_rgb(90, 90, 115);
 const SUCCESS: egui::Color32 = egui::Color32::from_rgb(80, 200, 120);
 const ERROR_COLOR: egui::Color32 = egui::Color32::from_rgb(220, 80, 80);
 const BORDER: egui::Color32 = egui::Color32::from_rgb(50, 50, 75);
+const PROGRESS_BG: egui::Color32 = egui::Color32::from_rgb(40, 40, 65);
 
 fn setup_theme(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
-
-    // Visuals
     let v = &mut style.visuals;
     v.dark_mode = true;
     v.override_text_color = Some(TEXT_PRIMARY);
-
     v.window_fill = BG_DARK;
     v.panel_fill = BG_PANEL;
     v.faint_bg_color = BG_CARD;
-
     v.window_rounding = egui::Rounding::same(12.0);
     v.window_shadow = egui::epaint::Shadow::NONE;
 
-    // Widget defaults
     v.widgets.noninteractive.bg_fill = BG_CARD;
     v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT_SECONDARY);
     v.widgets.noninteractive.rounding = egui::Rounding::same(8.0);
-
     v.widgets.inactive.bg_fill = BG_CARD;
     v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
     v.widgets.inactive.rounding = egui::Rounding::same(8.0);
     v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-
     v.widgets.hovered.bg_fill = egui::Color32::from_rgb(45, 45, 72);
     v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
     v.widgets.hovered.rounding = egui::Rounding::same(8.0);
     v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-
     v.widgets.active.bg_fill = ACCENT_DIM;
     v.widgets.active.fg_stroke = egui::Stroke::new(1.0, TEXT_PRIMARY);
     v.widgets.active.rounding = egui::Rounding::same(8.0);
-
-    // Selection
     v.selection.bg_fill = ACCENT.linear_multiply(0.3);
     v.selection.stroke = egui::Stroke::new(1.0, ACCENT);
 
-    // Spacing
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(16.0, 8.0);
-
     ctx.set_style(style);
 }
 
@@ -102,8 +100,8 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([520.0, 520.0])
-            .with_min_inner_size([520.0, 520.0])
+            .with_inner_size([520.0, 580.0])
+            .with_min_inner_size([520.0, 580.0])
             .with_decorations(true),
         ..Default::default()
     };
@@ -118,12 +116,25 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+// ─── Install Steps ─────────────────────────────────────────────────────────
+
+const STEP_NAMES: &[&str] = &[
+    "Creating directories",
+    "Installing KiVM",
+    "Installing KiComp",
+    "Installing icon",
+    "Configuring PATH",
+    "Setting file associations",
+    "Installing documentation",
+    "Finalizing",
+];
+
 // ─── App State ─────────────────────────────────────────────────────────────
 
 #[derive(PartialEq)]
 enum InstallState {
     Ready,
-    Installing,
+    Installing { step: usize, total: usize },
     Done,
     Failed(String),
 }
@@ -132,6 +143,7 @@ struct InstallerApp {
     install_path: PathBuf,
     install_kivm: bool,
     install_kicomp: bool,
+    install_docs: bool,
     add_to_path: bool,
     state: InstallState,
 }
@@ -142,72 +154,134 @@ impl InstallerApp {
             install_path: default_install_path(),
             install_kivm: true,
             install_kicomp: true,
+            install_docs: true,
             add_to_path: true,
             state: InstallState::Ready,
         }
     }
 
     fn install(&mut self) {
-        self.state = InstallState::Installing;
-        match self.perform_install() {
-            Ok(()) => self.state = InstallState::Done,
-            Err(e) => self.state = InstallState::Failed(format!("{}", e)),
-        }
-    }
+        let total = STEP_NAMES.len();
+        let mut current_step = 0;
 
-    fn perform_install(&mut self) -> std::io::Result<()> {
-        fs::create_dir_all(&self.install_path)?;
+        macro_rules! step {
+            ($body:expr) => {
+                self.state = InstallState::Installing { step: current_step, total };
+                current_step += 1;
+                if let Err(e) = (|| -> std::io::Result<()> { $body; Ok(()) })() {
+                    self.state = InstallState::Failed(format!("{}: {}", STEP_NAMES[current_step - 1], e));
+                    return;
+                }
+            };
+        }
+
+        // Step 0: Create directories
+        step!({
+            fs::create_dir_all(&self.install_path)?;
+            fs::create_dir_all(self.install_path.join("bin"))?;
+            fs::create_dir_all(self.install_path.join("assets"))
+        });
 
         let bin_dir = self.install_path.join("bin");
-        fs::create_dir_all(&bin_dir)?;
 
-        let cli_path = bin_dir.join(cli_filename());
-        let comp_path = bin_dir.join(kicomp_filename());
-
-        if self.install_kivm {
-            fs::write(&cli_path, CLI_BYTES)?;
-            #[cfg(unix)]
-            set_executable(&cli_path)?;
-        }
-
-        if self.install_kicomp {
-            fs::write(&comp_path, KICOMP_BYTES)?;
-            #[cfg(unix)]
-            set_executable(&comp_path)?;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            if self.add_to_path {
-                add_to_user_path_win(&bin_dir)?;
-            }
-            let exe = cli_path.to_str().unwrap();
-            let comp_exe = comp_path.to_str().unwrap();
+        // Step 1: Install KiVM
+        step!({
             if self.install_kivm {
-                register_progid(".exki", "Kinetix.Bundle")?;
-                register_shell("Kinetix.Bundle", "Kinetix Bundle", exe, "run")?;
-                register_progid(".kix", "Kinetix.Source")?;
-                register_progid(".ki", "Kinetix.Source")?;
-                register_shell("Kinetix.Source", "Kinetix Source File", exe, "exec")?;
+                let cli_path = bin_dir.join(cli_filename());
+                fs::write(&cli_path, CLI_BYTES)?;
+                #[cfg(unix)]
+                set_executable(&cli_path)?;
             }
+        });
+
+        // Step 2: Install KiComp
+        step!({
             if self.install_kicomp {
-                register_progid(".kicomp", "Kinetix.Build")?;
-                register_shell("Kinetix.Build", "Kinetix Build Script", comp_exe, "")?;
+                let comp_path = bin_dir.join(kicomp_filename());
+                fs::write(&comp_path, KICOMP_BYTES)?;
+                #[cfg(unix)]
+                set_executable(&comp_path)?;
             }
-        }
+        });
 
-        #[cfg(target_os = "linux")]
-        {
-            if self.add_to_path { add_to_path_unix(&bin_dir)?; }
+        // Step 3: Install icon
+        step!({
+            let icon_path = self.install_path.join("assets").join("KiFile.png");
+            fs::write(&icon_path, ICON_BYTES)
+        });
+
+        // Step 4: Configure PATH
+        step!({
+            if self.add_to_path {
+                #[cfg(target_os = "windows")]
+                add_to_user_path_win(&bin_dir)?;
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                add_to_path_unix(&bin_dir)?;
+            }
+        });
+
+        // Step 5: File associations
+        step!({
+            #[cfg(target_os = "windows")]
+            {
+                let icon_path = self.install_path.join("assets").join("KiFile.png");
+                let icon_str = icon_path.to_string_lossy().to_string();
+                let cli_path = bin_dir.join(cli_filename());
+                let comp_path = bin_dir.join(kicomp_filename());
+                let exe = cli_path.to_str().unwrap();
+                let comp_exe = comp_path.to_str().unwrap();
+
+                if self.install_kivm {
+                    register_progid(".exki", "Kinetix.Bundle")?;
+                    register_shell("Kinetix.Bundle", "Kinetix Bundle", exe, "run", &icon_str)?;
+                    register_progid(".kix", "Kinetix.Source")?;
+                    register_progid(".ki", "Kinetix.Source")?;
+                    register_shell("Kinetix.Source", "Kinetix Source File", exe, "exec", &icon_str)?;
+                }
+                if self.install_kicomp {
+                    register_progid(".kicomp", "Kinetix.Build")?;
+                    register_shell("Kinetix.Build", "Kinetix Build Script", comp_exe, "", &icon_str)?;
+                }
+            }
+            #[cfg(target_os = "linux")]
             create_desktop_entry(&self.install_path)?;
-        }
+        });
 
-        #[cfg(target_os = "macos")]
-        {
-            if self.add_to_path { add_to_path_unix(&bin_dir)?; }
-        }
+        // Step 6: Install documentation
+        step!({
+            if self.install_docs {
+                // Copy docs from the embedded Documentation/ folder
+                // The build script should have placed docs alongside the installer
+                // We look for a docs/ folder next to the installer executable
+                let exe_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+                
+                let docs_dest = self.install_path.join("docs");
+                fs::create_dir_all(&docs_dest)?;
 
-        Ok(())
+                // Try to find docs next to the installer
+                if let Some(exe_parent) = &exe_dir {
+                    let docs_src = exe_parent.join("docs");
+                    if docs_src.exists() {
+                        copy_dir_recursive(&docs_src, &docs_dest)?;
+                    }
+                    // Also try parent/Documentation
+                    let docs_src2 = exe_parent.parent()
+                        .map(|p| p.join("Documentation"));
+                    if let Some(ref src2) = docs_src2 {
+                        if src2.exists() {
+                            copy_dir_recursive(src2, &docs_dest)?;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Step 7: Finalize
+        step!({});
+
+        self.state = InstallState::Done;
     }
 }
 
@@ -248,139 +322,17 @@ impl eframe::App for InstallerApp {
                     ui.add_space(12.0);
                 });
 
-                // ── Components card ──
-                ui.add_space(8.0);
-                egui::Frame::none()
-                    .fill(BG_CARD)
-                    .rounding(10.0)
-                    .inner_margin(16.0)
-                    .stroke(egui::Stroke::new(1.0, BORDER))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("Components")
-                                .size(13.0)
-                                .color(TEXT_SECONDARY)
-                                .strong()
-                        );
-                        ui.add_space(6.0);
-                        ui.checkbox(&mut self.install_kivm, egui::RichText::new("KiVM — Interpreter & CLI").size(14.0));
-                        ui.checkbox(&mut self.install_kicomp, egui::RichText::new("KiComp — Compiler & Build System").size(14.0));
-                    });
-
-                // ── Integration card ──
-                ui.add_space(8.0);
-                egui::Frame::none()
-                    .fill(BG_CARD)
-                    .rounding(10.0)
-                    .inner_margin(16.0)
-                    .stroke(egui::Stroke::new(1.0, BORDER))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("System Integration")
-                                .size(13.0)
-                                .color(TEXT_SECONDARY)
-                                .strong()
-                        );
-                        ui.add_space(6.0);
-                        ui.checkbox(&mut self.add_to_path, egui::RichText::new("Add to user PATH").size(14.0));
-                    });
-
-                // ── Install path ──
-                ui.add_space(8.0);
-                egui::Frame::none()
-                    .fill(BG_CARD)
-                    .rounding(10.0)
-                    .inner_margin(16.0)
-                    .stroke(egui::Stroke::new(1.0, BORDER))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("Install Location")
-                                .size(13.0)
-                                .color(TEXT_SECONDARY)
-                                .strong()
-                        );
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(self.install_path.to_string_lossy())
-                                    .size(13.0)
-                                    .color(TEXT_PRIMARY)
-                                    .monospace()
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button(egui::RichText::new("Browse").size(12.0)).clicked() {
-                                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                                        self.install_path = path;
-                                    }
-                                }
-                            });
-                        });
-                    });
-
-                // ── Action / Status ──
-                ui.add_space(16.0);
-
                 match &self.state {
-                    InstallState::Ready => {
-                        ui.vertical_centered(|ui| {
-                            let btn = egui::Button::new(
-                                egui::RichText::new("  INSTALL  ")
-                                    .size(16.0)
-                                    .strong()
-                                    .color(egui::Color32::WHITE)
-                            )
-                            .fill(ACCENT)
-                            .rounding(10.0)
-                            .min_size(egui::vec2(200.0, 44.0));
-
-                            if ui.add(btn).clicked() {
-                                self.install();
-                            }
-                        });
+                    InstallState::Ready => self.draw_config(ui),
+                    InstallState::Installing { step, total } => {
+                        let step = *step;
+                        let total = *total;
+                        self.draw_progress(ui, step, total);
                     }
-                    InstallState::Installing => {
-                        ui.vertical_centered(|ui| {
-                            ui.spinner();
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("Installing...")
-                                    .size(14.0)
-                                    .color(TEXT_SECONDARY)
-                            );
-                        });
-                    }
-                    InstallState::Done => {
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("✓  Installation complete")
-                                    .size(16.0)
-                                    .color(SUCCESS)
-                                    .strong()
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("Restart your terminal to use kivm.")
-                                    .size(13.0)
-                                    .color(TEXT_SECONDARY)
-                            );
-                        });
-                    }
+                    InstallState::Done => self.draw_done(ui),
                     InstallState::Failed(msg) => {
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                egui::RichText::new("✗  Installation failed")
-                                    .size(16.0)
-                                    .color(ERROR_COLOR)
-                                    .strong()
-                            );
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(msg)
-                                    .size(12.0)
-                                    .color(TEXT_SECONDARY)
-                                    .monospace()
-                            );
-                        });
+                        let msg = msg.clone();
+                        self.draw_failed(ui, &msg);
                     }
                 }
 
@@ -397,7 +349,189 @@ impl eframe::App for InstallerApp {
     }
 }
 
-// ─── Cross-platform helpers ────────────────────────────────────────────────
+impl InstallerApp {
+    fn draw_config(&mut self, ui: &mut egui::Ui) {
+        // Components card
+        ui.add_space(4.0);
+        egui::Frame::none()
+            .fill(BG_CARD)
+            .rounding(10.0)
+            .inner_margin(16.0)
+            .stroke(egui::Stroke::new(1.0, BORDER))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Components").size(13.0).color(TEXT_SECONDARY).strong());
+                ui.add_space(6.0);
+                ui.checkbox(&mut self.install_kivm, egui::RichText::new("KiVM — Interpreter, CLI & Shell").size(14.0));
+                ui.checkbox(&mut self.install_kicomp, egui::RichText::new("KiComp — Compiler & Build System").size(14.0));
+                ui.checkbox(&mut self.install_docs, egui::RichText::new("Documentation (offline, opens with kivm docs)").size(14.0));
+            });
+
+        // Integration card
+        ui.add_space(8.0);
+        egui::Frame::none()
+            .fill(BG_CARD)
+            .rounding(10.0)
+            .inner_margin(16.0)
+            .stroke(egui::Stroke::new(1.0, BORDER))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("System Integration").size(13.0).color(TEXT_SECONDARY).strong());
+                ui.add_space(6.0);
+                ui.checkbox(&mut self.add_to_path, egui::RichText::new("Add to user PATH").size(14.0));
+            });
+
+        // Install path
+        ui.add_space(8.0);
+        egui::Frame::none()
+            .fill(BG_CARD)
+            .rounding(10.0)
+            .inner_margin(16.0)
+            .stroke(egui::Stroke::new(1.0, BORDER))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Install Location").size(13.0).color(TEXT_SECONDARY).strong());
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(self.install_path.to_string_lossy())
+                            .size(13.0)
+                            .color(TEXT_PRIMARY)
+                            .monospace()
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("Browse").size(12.0)).clicked() {
+                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                self.install_path = path;
+                            }
+                        }
+                    });
+                });
+            });
+
+        // Install button
+        ui.add_space(16.0);
+        ui.vertical_centered(|ui| {
+            let btn = egui::Button::new(
+                egui::RichText::new("  INSTALL  ")
+                    .size(16.0)
+                    .strong()
+                    .color(egui::Color32::WHITE)
+            )
+            .fill(ACCENT)
+            .rounding(10.0)
+            .min_size(egui::vec2(200.0, 44.0));
+
+            if ui.add(btn).clicked() {
+                self.install();
+            }
+        });
+    }
+
+    fn draw_progress(&self, ui: &mut egui::Ui, step: usize, total: usize) {
+        ui.add_space(30.0);
+        ui.vertical_centered(|ui| {
+            let step_name = STEP_NAMES.get(step).unwrap_or(&"Working...");
+            ui.label(
+                egui::RichText::new(format!("{}...", step_name))
+                    .size(16.0)
+                    .color(TEXT_PRIMARY)
+                    .strong()
+            );
+
+            ui.add_space(16.0);
+
+            // Progress bar
+            let progress = step as f32 / total as f32;
+            let bar_width = 360.0;
+            let bar_height = 12.0;
+
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(bar_width, bar_height),
+                egui::Sense::hover(),
+            );
+
+            // Background
+            ui.painter().rect_filled(rect, 6.0, PROGRESS_BG);
+
+            // Fill
+            let fill_rect = egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(bar_width * progress, bar_height),
+            );
+            ui.painter().rect_filled(fill_rect, 6.0, ACCENT);
+
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(format!("{} / {}", step + 1, total))
+                    .size(13.0)
+                    .color(TEXT_SECONDARY)
+            );
+        });
+    }
+
+    fn draw_done(&self, ui: &mut egui::Ui) {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("✓")
+                    .size(48.0)
+                    .color(SUCCESS)
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Installation complete!")
+                    .size(18.0)
+                    .color(SUCCESS)
+                    .strong()
+            );
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new("Restart your terminal to use kivm.")
+                    .size(14.0)
+                    .color(TEXT_SECONDARY)
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(format!("Installed to: {}", self.install_path.display()))
+                    .size(12.0)
+                    .color(TEXT_DIM)
+                    .monospace()
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Try: kivm shell")
+                    .size(13.0)
+                    .color(ACCENT)
+                    .monospace()
+            );
+        });
+    }
+
+    fn draw_failed(&self, ui: &mut egui::Ui, msg: &str) {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("✗")
+                    .size(48.0)
+                    .color(ERROR_COLOR)
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Installation failed")
+                    .size(18.0)
+                    .color(ERROR_COLOR)
+                    .strong()
+            );
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(msg)
+                    .size(12.0)
+                    .color(TEXT_SECONDARY)
+                    .monospace()
+            );
+        });
+    }
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
 
 fn default_install_path() -> PathBuf {
     if let Some(dirs) = directories::BaseDirs::new() {
@@ -407,6 +541,23 @@ fn default_install_path() -> PathBuf {
     } else {
         PathBuf::from("/opt/kinetix")
     }
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            // Skip .git directories
+            if entry.file_name() == ".git" { continue; }
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -440,11 +591,23 @@ fn create_desktop_entry(install_path: &Path) -> std::io::Result<()> {
     let home = std::env::var("HOME").unwrap_or_default();
     let apps_dir = PathBuf::from(&home).join(".local/share/applications");
     fs::create_dir_all(&apps_dir)?;
+    let icon_path = install_path.join("assets").join("KiFile.png");
     fs::write(
         apps_dir.join("kinetix.desktop"),
         format!(
-            "[Desktop Entry]\nName=Kinetix\nComment=Kinetix Language Runtime\nExec={}/bin/kivm exec %f\nTerminal=true\nType=Application\nCategories=Development;\nMimeType=text/x-kinetix;\n",
-            install_path.display()
+            "[Desktop Entry]\nName=Kinetix\nComment=Kinetix Language Runtime\nExec={bin}/kivm exec %f\nIcon={icon}\nTerminal=true\nType=Application\nCategories=Development;\nMimeType=text/x-kinetix;\n",
+            bin = install_path.join("bin").display(),
+            icon = icon_path.display()
+        ),
+    )?;
+
+    // Also create a shell entry for kivm shell
+    fs::write(
+        apps_dir.join("kinetix-shell.desktop"),
+        format!(
+            "[Desktop Entry]\nName=Kinetix Shell\nComment=Kinetix Interactive Terminal\nExec={bin}/kivm shell\nIcon={icon}\nTerminal=true\nType=Application\nCategories=Development;System;\n",
+            bin = install_path.join("bin").display(),
+            icon = icon_path.display()
         ),
     )?;
     Ok(())
@@ -476,13 +639,16 @@ fn register_progid(ext: &str, prog_id: &str) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn register_shell(prog_id: &str, desc: &str, exe: &str, arg: &str) -> std::io::Result<()> {
+fn register_shell(prog_id: &str, desc: &str, exe: &str, arg: &str, icon_path: &str) -> std::io::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let classes = hkcu.open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)?;
     let (prog_key, _) = classes.create_subkey(prog_id)?;
     prog_key.set_value("", &desc)?;
+
+    // Use KiFile.png as the icon
     let (icon_key, _) = prog_key.create_subkey("DefaultIcon")?;
-    icon_key.set_value("", &format!("{},0", exe))?;
+    icon_key.set_value("", &icon_path)?;
+
     let (cmd_key, _) = prog_key.create_subkey("shell\\open\\command")?;
     let cmd = if arg.is_empty() {
         format!("\"{}\" \"%1\"", exe)

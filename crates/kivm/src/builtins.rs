@@ -411,6 +411,12 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
              modules::llm::call(func, args, vm)
         },
 
+        // --- Term Module ---
+        s if s.starts_with("term.") => {
+             let func = s.strip_prefix("term.").unwrap();
+             modules::term::call(func, args)
+        },
+
         // --- Env Module Override/Expansion ---
         "env.cwd" => {
             std::env::current_dir()
