@@ -67,6 +67,15 @@ pub enum Opcode {
     SetIndex = 53,
     /// Make array with B elements starting from register A, result in A
     MakeArray = 54,
+    
+    /// Make map with B key-value pairs from registers A..A+B*2
+    MakeMap = 55,
+    /// Make range [B..C) -> A
+    MakeRange = 56,
+    /// Get Iterator: A = iter(B)
+    GetIter = 57,
+    /// Advance Iterator: A = next(B), jump to C if done
+    IterNext = 58,
 
     // Control flow
     /// Jump to instruction at offset A (absolute)
@@ -85,6 +94,8 @@ pub enum Opcode {
     ReturnVoid = 72,
     /// Create closure: A = closure(const[B]) capturing C registers
     MakeClosure = 73,
+    /// Tail Call: Reuse current frame for recursive call
+    TailCall = 74,
 
     // Built-in operations
     /// Print register A
@@ -103,23 +114,23 @@ pub enum Opcode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Instruction {
     pub opcode: Opcode,
-    pub a: u8,
-    pub b: u8,
-    pub c: u8,
+    pub a: u16,
+    pub b: u16,
+    pub c: u16,
 }
 
 impl Instruction {
-    pub fn new(opcode: Opcode, a: u8, b: u8, c: u8) -> Self {
+    pub fn new(opcode: Opcode, a: u16, b: u16, c: u16) -> Self {
         Self { opcode, a, b, c }
     }
 
     /// Shorthand for opcodes that only use register A
-    pub fn a_only(opcode: Opcode, a: u8) -> Self {
+    pub fn a_only(opcode: Opcode, a: u16) -> Self {
         Self { opcode, a, b: 0, c: 0 }
     }
 
     /// Shorthand for opcodes that use A and B
-    pub fn ab(opcode: Opcode, a: u8, b: u8) -> Self {
+    pub fn ab(opcode: Opcode, a: u16, b: u16) -> Self {
         Self { opcode, a, b, c: 0 }
     }
 }
@@ -133,21 +144,28 @@ pub enum Constant {
     Boolean(bool),
     Null,
     Function(usize),
+    /// Compiled class descriptor
+    Class {
+        name: String,
+        methods: Vec<usize>, // indices into functions
+        fields: Vec<String>,
+        parent: Option<String>,
+    },
 }
 
 /// A compiled function: its bytecode, constants, and metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledFunction {
     pub name: String,
-    pub arity: u8,          // number of parameters
-    pub locals: u8,         // number of local variable slots
+    pub arity: u16,          // number of parameters
+    pub locals: u16,         // number of local variable slots
     pub instructions: Vec<Instruction>,
     pub constants: Vec<Constant>,
     pub param_names: Vec<String>,
 }
 
 impl CompiledFunction {
-    pub fn new(name: String, arity: u8) -> Self {
+    pub fn new(name: String, arity: u16) -> Self {
         Self {
             name,
             arity,
@@ -159,14 +177,14 @@ impl CompiledFunction {
     }
 
     /// Add a constant and return its index.
-    pub fn add_constant(&mut self, c: Constant) -> u8 {
+    pub fn add_constant(&mut self, c: Constant) -> u16 {
         // Deduplicate
         for (i, existing) in self.constants.iter().enumerate() {
             if existing == &c {
-                return i as u8;
+                return i as u16;
             }
         }
-        let idx = self.constants.len() as u8;
+        let idx = self.constants.len() as u16;
         self.constants.push(c);
         idx
     }
@@ -192,7 +210,7 @@ impl CompiledProgram {
         Self {
             main: CompiledFunction::new("<main>".to_string(), 0),
             functions: vec![],
-            version: "0.1.0".to_string(),
+            version: "0.1.0".to_string(), // will be updated by compiler
         }
     }
 }

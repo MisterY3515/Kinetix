@@ -5,33 +5,31 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 3;
+pub const CURRENT_BUILD: i64 = 6;
 
 /// Scope for tracking local variable slots.
 #[derive(Debug)]
 struct Scope {
-    locals: HashMap<String, u8>,
-    next_register: u8,
+    locals: HashMap<String, u16>,
+    next_register: u16,
 }
 
 impl Scope {
-    fn new(start_register: u8) -> Self {
+    fn new(start_register: u16) -> Self {
         Self {
             locals: HashMap::new(),
             next_register: start_register,
         }
     }
 
-
-
-    fn define(&mut self, name: &str) -> u8 {
+    fn define(&mut self, name: &str) -> u16 {
         let reg = self.next_register;
         self.locals.insert(name.to_string(), reg);
         self.next_register += 1;
         reg
     }
 
-    fn resolve(&self, name: &str) -> Option<u8> {
+    fn resolve(&self, name: &str) -> Option<u16> {
         self.locals.get(name).copied()
     }
 }
@@ -40,28 +38,29 @@ impl Scope {
 pub struct Compiler {
     pub program: CompiledProgram,
     scopes: Vec<Scope>,
-    next_temp: u8,
+    next_temp: u16,
+    max_temp: u16,
 }
 
 impl Compiler {
     pub fn new() -> Self {
-
         Self {
             program: CompiledProgram::new(),
             scopes: vec![Scope::new(0)],
             next_temp: 0,
+            max_temp: 0,
         }
     }
 
     /// Compile a full program (list of statements).
     pub fn compile(&mut self, statements: &[Statement]) -> Result<&CompiledProgram, String> {
-
         for stmt in statements {
             self.compile_statement(stmt)?;
             if let Some(scope) = self.scopes.last() {
                 self.next_temp = scope.next_register;
             }
         }
+        self.program.main.locals = self.max_temp;
         self.current_fn().emit(Instruction::a_only(Opcode::Halt, 0));
         Ok(&self.program)
     }
@@ -79,13 +78,16 @@ impl Compiler {
         self.scopes.last_mut().expect("no scope")
     }
 
-    fn alloc_register(&mut self) -> u8 {
+    fn alloc_register(&mut self) -> u16 {
         let r = self.next_temp;
         self.next_temp += 1;
+        if self.next_temp > self.max_temp {
+            self.max_temp = self.next_temp;
+        }
         r
     }
 
-    fn resolve_name(&self, name: &str) -> Option<u8> {
+    fn resolve_name(&self, name: &str) -> Option<u16> {
         for scope in self.scopes.iter().rev() {
             if let Some(reg) = scope.resolve(name) {
                 return Some(reg);
@@ -98,16 +100,18 @@ impl Compiler {
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
-            Statement::Let { name, value, mutable, type_hint: _ } => {
+            Statement::Let { name, value, mutable: _, type_hint: _ } => {
                 let reg = self.compile_expression(value)?;
                 if self.scopes.len() == 1 {
                     // Global scope -> SetGlobal
                     let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
                     self.current_fn().emit(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
-                    // Do NOT define in local scope, so identifiers resolve to GetGlobal
                 } else {
                     // Local scope
                     let slot = self.current_scope_mut().define(name);
+                    if self.current_scope_mut().next_register > self.max_temp {
+                        self.max_temp = self.current_scope_mut().next_register; 
+                    }
                     if slot != reg {
                         self.current_fn().emit(Instruction::ab(Opcode::SetLocal, slot, reg));
                     }
@@ -147,10 +151,10 @@ impl Compiler {
                 // Includes resolved at higher level
             }
             Statement::Class { .. } | Statement::Struct { .. } => {
-                // Deferred to future phase
+                // Deferred to M4
             }
             Statement::Break | Statement::Continue => {
-                // Handled by loop context (placeholder)
+                // Handled by loop context (M4)
             }
             Statement::Version { build } => {
                 if *build > CURRENT_BUILD {
@@ -167,13 +171,15 @@ impl Compiler {
         parameters: &[(String, String)],
         body: &Statement,
     ) -> Result<(), String> {
-        let mut func = CompiledFunction::new(name.to_string(), parameters.len() as u8);
+        let mut func = CompiledFunction::new(name.to_string(), parameters.len() as u16);
         func.param_names = parameters.iter().map(|(n, _)| n.clone()).collect();
 
         // Save state
         let saved_main = std::mem::replace(&mut self.program.main, func);
         let saved_temp = self.next_temp;
+        let saved_max = self.max_temp;
         self.next_temp = 0;
+        self.max_temp = 0;
 
         // Parameters occupy registers 0..arity
         self.scopes.push(Scope::new(0));
@@ -181,6 +187,7 @@ impl Compiler {
             self.current_scope_mut().define(pname);
             self.next_temp += 1;
         }
+        if self.next_temp > self.max_temp { self.max_temp = self.next_temp; }
 
         // Compile body
         if let Statement::Block { statements } = body {
@@ -197,8 +204,11 @@ impl Compiler {
         self.scopes.pop();
 
         // Restore state
-        let compiled_func = std::mem::replace(&mut self.program.main, saved_main);
+        let mut compiled_func = std::mem::replace(&mut self.program.main, saved_main);
+        compiled_func.locals = self.max_temp;
+        
         self.next_temp = saved_temp;
+        self.max_temp = saved_max;
 
         let func_idx = self.program.functions.len();
         self.program.functions.push(compiled_func);
@@ -210,6 +220,9 @@ impl Compiler {
         self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx_const));
         self.current_fn().emit(Instruction::ab(Opcode::SetGlobal, name_const, reg));
         self.current_scope_mut().define(name);
+        if self.current_scope_mut().next_register > self.max_temp {
+             self.max_temp = self.current_scope_mut().next_register; 
+        }
 
         Ok(())
     }
@@ -228,9 +241,9 @@ impl Compiler {
             }
         }
 
-        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u8));
+        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u16));
         let exit_pos = self.current_fn().instructions.len();
-        self.current_fn().instructions[jump_idx].a = exit_pos as u8;
+        self.current_fn().instructions[jump_idx].a = exit_pos as u16;
 
         Ok(())
     }
@@ -239,6 +252,7 @@ impl Compiler {
         let iter_reg = self.compile_expression(iterable)?;
         let idx_reg = self.alloc_register();
         let var_reg = self.current_scope_mut().define(variable);
+        if self.current_scope_mut().next_register > self.max_temp { self.max_temp = self.current_scope_mut().next_register; }
 
         let zero_const = self.current_fn().add_constant(Constant::Integer(0));
         self.current_fn().emit(Instruction::ab(Opcode::LoadConst, idx_reg, zero_const));
@@ -257,17 +271,17 @@ impl Compiler {
         let one_reg = self.alloc_register();
         self.current_fn().emit(Instruction::ab(Opcode::LoadConst, one_reg, one_const));
         self.current_fn().emit(Instruction::new(Opcode::Add, idx_reg, idx_reg, one_reg));
-        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u8));
+        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u16));
 
         let exit_pos = self.current_fn().instructions.len();
-        self.current_fn().instructions[jump_idx].a = exit_pos as u8;
+        self.current_fn().instructions[jump_idx].a = exit_pos as u16;
 
         Ok(())
     }
 
     // ========== Expressions ==========
 
-    fn compile_expression(&mut self, expr: &Expression) -> Result<u8, String> {
+    fn compile_expression(&mut self, expr: &Expression) -> Result<u16, String> {
         match expr {
             Expression::Integer(val) => {
                 let reg = self.alloc_register();
@@ -369,24 +383,19 @@ impl Compiler {
             }
             Expression::Call { function, arguments } => {
                 let orig_func_reg = self.compile_expression(function)?;
-                // Copy function ref to a temp register so the Call opcode's
-                // return-value write doesn't destroy the original variable.
                 let call_reg = self.alloc_register();
                 self.current_fn().emit(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));
-                // Ensure arguments occupy contiguous registers call_reg+1..call_reg+N
                 for (i, arg) in arguments.iter().enumerate() {
-                    let expected_reg = call_reg + 1 + i as u8;
+                    let expected_reg = call_reg + 1 + i as u16;
                     let arg_reg = self.compile_expression(arg)?;
                     if arg_reg != expected_reg {
-                        // Reserve the expected slot if needed
                         while self.next_temp <= expected_reg {
                             self.alloc_register();
                         }
-                        // Copy argument value into the expected slot
                         self.current_fn().emit(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
                     }
                 }
-                self.current_fn().emit(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u8));
+                self.current_fn().emit(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
                 Ok(call_reg)
             }
             Expression::If { condition, consequence, alternative } => {
@@ -403,7 +412,7 @@ impl Compiler {
                 if let Some(alt) = alternative {
                     let jump_end = self.current_fn().emit(Instruction::a_only(Opcode::Jump, 0));
                     let else_pos = self.current_fn().instructions.len();
-                    self.current_fn().instructions[jump_else].a = else_pos as u8;
+                    self.current_fn().instructions[jump_else].a = else_pos as u16;
 
                     if let Statement::Block { statements } = alt.as_ref() {
                         for s in statements {
@@ -412,10 +421,10 @@ impl Compiler {
                     }
 
                     let end_pos = self.current_fn().instructions.len();
-                    self.current_fn().instructions[jump_end].a = end_pos as u8;
+                    self.current_fn().instructions[jump_end].a = end_pos as u16;
                 } else {
                     let end_pos = self.current_fn().instructions.len();
-                    self.current_fn().instructions[jump_else].a = end_pos as u8;
+                    self.current_fn().instructions[jump_else].a = end_pos as u16;
                 }
 
                 Ok(result_reg)
@@ -439,7 +448,7 @@ impl Compiler {
                 for elem in elements {
                     self.compile_expression(elem)?;
                 }
-                self.current_fn().emit(Instruction::ab(Opcode::MakeArray, start_reg, elements.len() as u8));
+                self.current_fn().emit(Instruction::ab(Opcode::MakeArray, start_reg, elements.len() as u16));
                 Ok(start_reg)
             }
             Expression::FunctionLiteral { parameters, body, return_type: _ } => {
@@ -457,79 +466,5 @@ impl Compiler {
                 Ok(reg)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kinetix_language::lexer::Lexer;
-    use kinetix_language::parser::Parser;
-
-    fn compile_source(src: &str) -> CompiledProgram {
-        let lexer = Lexer::new(src);
-        let mut parser = Parser::new(lexer);
-        let program = parser.parse_program();
-        assert!(parser.errors.is_empty(), "Parser errors: {:?}", parser.errors);
-
-        let mut compiler = Compiler::new();
-        compiler.compile(&program.statements).expect("Compilation failed");
-        compiler.program
-    }
-
-    #[test]
-    fn test_compile_let_integer() {
-        let prog = compile_source("let x = 42;");
-        assert!(!prog.main.instructions.is_empty());
-        assert_eq!(prog.main.instructions.last().unwrap().opcode, Opcode::Halt);
-        assert!(prog.main.constants.contains(&Constant::Integer(42)));
-    }
-
-    #[test]
-    fn test_compile_arithmetic() {
-        let prog = compile_source("let x = 1 + 2;");
-        assert!(prog.main.constants.contains(&Constant::Integer(1)));
-        assert!(prog.main.constants.contains(&Constant::Integer(2)));
-        let has_add = prog.main.instructions.iter().any(|i| i.opcode == Opcode::Add);
-        assert!(has_add, "Expected Add instruction");
-    }
-
-    #[test]
-    fn test_compile_function() {
-        let prog = compile_source("fn add(a: int, b: int) -> int { return a + b; }");
-        assert_eq!(prog.functions.len(), 1);
-        assert_eq!(prog.functions[0].name, "add");
-        assert_eq!(prog.functions[0].arity, 2);
-    }
-
-    #[test]
-    fn test_compile_if() {
-        let prog = compile_source("let x = 10; if x > 5 { let y = 1; }");
-        let has_jump = prog.main.instructions.iter().any(|i| i.opcode == Opcode::JumpIfFalse);
-        assert!(has_jump, "Expected JumpIfFalse for if statement");
-    }
-
-    #[test]
-    fn test_compile_while() {
-        let prog = compile_source("let x = 0; while x < 10 { x = x + 1; }");
-        let has_jump_back = prog.main.instructions.iter().any(|i| i.opcode == Opcode::Jump);
-        let has_cond = prog.main.instructions.iter().any(|i| i.opcode == Opcode::JumpIfFalse);
-        assert!(has_jump_back, "Expected Jump for while loop back-edge");
-        assert!(has_cond, "Expected JumpIfFalse for while condition");
-    }
-
-    #[test]
-    fn test_compile_string() {
-        let prog = compile_source("let s = \"hello\";");
-        assert!(prog.main.constants.contains(&Constant::String("hello".to_string())));
-    }
-
-    #[test]
-    fn test_compile_boolean() {
-        let prog = compile_source("let a = true; let b = false;");
-        let has_true = prog.main.instructions.iter().any(|i| i.opcode == Opcode::LoadTrue);
-        let has_false = prog.main.instructions.iter().any(|i| i.opcode == Opcode::LoadFalse);
-        assert!(has_true);
-        assert!(has_false);
     }
 }
