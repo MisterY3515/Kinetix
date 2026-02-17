@@ -1,0 +1,19 @@
+[package]
+name = "kinetix-installer"
+version = "0.0.1"
+edition = "2024"
+
+[[bin]]
+name = "installer"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.29.1"
+rfd = "0.12" # construct native file dialogs
+
+directories = "5.0" # find standard directories
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+

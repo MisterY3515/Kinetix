@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "crates/language",
+    "crates/kicomp",
+    "crates/kivm",
+    "crates/cli",
+]
+# Installer uses include_bytes! to embed release binaries,
+# build with: cargo build -p kinetix-installer --release (after cargo build --release)
+exclude = ["crates/installer"]
+resolver = "2"
