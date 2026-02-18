@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-cli"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "directories",
@@ -1012,8 +1012,9 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kicomp"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
+ "bumpalo",
  "clap",
  "kinetix-language",
  "serde",
@@ -1022,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kivm"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "csv",
  "hex",
@@ -1043,7 +1044,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-language"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "clap",
  "env_logger",

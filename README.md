@@ -163,7 +163,7 @@ println(term.bold("important") + " and " + term.italic("elegant"))
 
 ```bash
 $ kivm shell
-Kinetix Shell v0.0.2 build 5
+Kinetix Shell v0.0.3 build 6
 
 ~ ❯ println(2 + 2)
 4
@@ -216,7 +216,7 @@ Kinetix Shell v0.0.2 build 5
 cargo build --release
 ```
 
-## Benchmarks (v0.0.2 Build 5)
+## Benchmarks (v0.0.3 Build 6)
 
 Parser speed tested on a synthetic source of **3,650 lines** (~70 KB) containing variables, functions, classes, loops, expressions, and arrays.
 
