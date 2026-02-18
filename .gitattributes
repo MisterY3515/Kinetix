@@ -3,6 +3,6 @@
 
 # Escludere tutti i Makefile
 Makefile linguist-detectable=false
-*/Makefile linguist-detectable=false
+**/Makefile linguist-detectable=false
 GNUmakefile linguist-detectable=false
 **/*.mk linguist-detectable=false
