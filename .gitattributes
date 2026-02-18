@@ -5,5 +5,10 @@
 ** linguist-detectable=false
 **/* linguist-detectable=false
 
-# Then explicitly include Rust files
+# Exclude script-like files in scripts/
+scripts/** linguist-detectable=false
+
+**/Makefile linguist-detectable=false
+
+# Rust
 *.rs linguist-detectable=true linguist-language=Rust
