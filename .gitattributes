@@ -1,8 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Escludere tutti i Makefile
-Makefile linguist-detectable=false
-**/Makefile linguist-detectable=false
-GNUmakefile linguist-detectable=false
-**/*.mk linguist-detectable=false
+# Exclude anything that might be mis-identified as Makefile
+** linguist-detectable=false
+**/* linguist-detectable=false
+
+# Then explicitly include Rust files
+*.rs linguist-detectable=true linguist-language=Rust
