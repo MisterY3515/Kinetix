@@ -7,10 +7,16 @@ use std::collections::HashMap;
 /// Current build version of the compiler/VM.
 pub const CURRENT_BUILD: i64 = 6;
 
+#[derive(Debug, Clone, Copy)]
+struct LocalInfo {
+    reg: u16,
+    moved: bool,
+}
+
 /// Scope for tracking local variable slots.
 #[derive(Debug)]
 struct Scope {
-    locals: HashMap<String, u16>,
+    locals: HashMap<String, LocalInfo>,
     next_register: u16,
 }
 
@@ -24,13 +30,9 @@ impl Scope {
 
     fn define(&mut self, name: &str) -> u16 {
         let reg = self.next_register;
-        self.locals.insert(name.to_string(), reg);
+        self.locals.insert(name.to_string(), LocalInfo { reg, moved: false });
         self.next_register += 1;
         reg
-    }
-
-    fn resolve(&self, name: &str) -> Option<u16> {
-        self.locals.get(name).copied()
     }
 }
 
@@ -87,10 +89,24 @@ impl Compiler {
         r
     }
 
-    fn resolve_name(&self, name: &str) -> Option<u16> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(reg) = scope.resolve(name) {
-                return Some(reg);
+    fn resolve_use(&mut self, name: &str) -> Result<Option<u16>, String> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(info) = scope.locals.get_mut(name) {
+                if info.moved {
+                    return Err(format!("Use of moved value '{}'", name));
+                }
+                info.moved = true; // Ownership transfer
+                return Ok(Some(info.reg));
+            }
+        }
+        Ok(None)
+    }
+
+    fn resolve_assign(&mut self, name: &str) -> Option<u16> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(info) = scope.locals.get_mut(name) {
+                info.moved = false; // Revitalize
+                return Some(info.reg);
             }
         }
         None
@@ -313,10 +329,10 @@ impl Compiler {
                 Ok(reg)
             }
             Expression::Identifier(name) => {
-                if let Some(reg) = self.resolve_name(name) {
+                if let Some(reg) = self.resolve_use(name)? {
                     return Ok(reg);
                 }
-                // Global lookup
+                // Global lookup (Globals are strict-const or unsafe-shared, we allow access)
                 let reg = self.alloc_register();
                 let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
                 self.current_fn().emit(Instruction::ab(Opcode::GetGlobal, reg, name_idx));
@@ -360,7 +376,7 @@ impl Compiler {
                 let val_reg = self.compile_expression(value)?;
                 match target.as_ref() {
                     Expression::Identifier(name) => {
-                        if let Some(slot) = self.resolve_name(name) {
+                        if let Some(slot) = self.resolve_assign(name) {
                             self.current_fn().emit(Instruction::ab(Opcode::SetLocal, slot, val_reg));
                         } else {
                             let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
@@ -368,12 +384,12 @@ impl Compiler {
                         }
                     }
                     Expression::MemberAccess { object, member } => {
-                        let obj_reg = self.compile_expression(object)?;
+                        let obj_reg = self.compile_expression(object)?; // Object moved if local!
                         let name_idx = self.current_fn().add_constant(Constant::String(member.clone()));
                         self.current_fn().emit(Instruction::new(Opcode::SetMember, obj_reg, name_idx, val_reg));
                     }
                     Expression::Index { left, index } => {
-                        let left_reg = self.compile_expression(left)?;
+                        let left_reg = self.compile_expression(left)?; // Array/Map moved if local!
                         let idx_reg = self.compile_expression(index)?;
                         self.current_fn().emit(Instruction::new(Opcode::SetIndex, left_reg, idx_reg, val_reg));
                     }
@@ -382,6 +398,17 @@ impl Compiler {
                 Ok(val_reg)
             }
             Expression::Call { function, arguments } => {
+                // Intrinsic: print(x)
+                if let Expression::Identifier(name) = function.as_ref() {
+                    if name == "print" && arguments.len() == 1 {
+                        let arg_reg = self.compile_expression(&arguments[0])?;
+                        self.current_fn().emit(Instruction::a_only(Opcode::Print, arg_reg));
+                        let null_reg = self.alloc_register();
+                        self.current_fn().emit(Instruction::a_only(Opcode::LoadNull, null_reg));
+                        return Ok(null_reg);
+                    }
+                }
+
                 let orig_func_reg = self.compile_expression(function)?;
                 let call_reg = self.alloc_register();
                 self.current_fn().emit(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));

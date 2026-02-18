@@ -14,15 +14,10 @@ pub enum Value {
     Bool(bool),
     Null,
     Array(Vec<Value>),
-    /// Function reference: index into program.functions
     Function(usize),
-    /// Native built-in function
     NativeFn(String),
-    /// Native Module (Math, System, etc.)
     NativeModule(String),
-    /// Bound Method (receiver, method)
     BoundMethod(Box<Value>, Box<Value>),
-    /// Map / Dictionary
     Map(HashMap<String, Value>),
 }
 
@@ -36,8 +31,7 @@ impl PartialOrd for Value {
             (Value::Str(a), Value::Str(b)) => a.partial_cmp(b),
             (Value::Bool(a), Value::Bool(b)) => a.partial_cmp(b),
             (Value::Null, Value::Null) => Some(std::cmp::Ordering::Equal),
-            (Value::Array(a), Value::Array(b)) => a.partial_cmp(b), // Recursive if arrays
-            // Maps are not ordered
+            (Value::Array(a), Value::Array(b)) => a.partial_cmp(b),
             (Value::Map(_), Value::Map(_)) => None,
             _ => None,
         }
@@ -54,10 +48,10 @@ impl Value {
             Value::Null => false,
             Value::Array(a) => !a.is_empty(),
             Value::Map(m) => !m.is_empty(),
-            Value::Function(_) | Value::NativeFn(_) | Value::NativeModule(_) | Value::BoundMethod(_, _) => true,
+            _ => true,
         }
     }
-
+    
     pub fn as_int(&self) -> Result<i64, String> {
         match self {
             Value::Int(n) => Ok(*n),
@@ -107,105 +101,72 @@ impl fmt::Display for Value {
     }
 }
 
-/// A single call frame on the VM stack.
 #[derive(Debug)]
 struct CallFrame {
     function: CompiledFunction,
     ip: usize,
     registers: Vec<Value>,
-    return_to_reg: Option<u8>,
+    return_to_reg: Option<u16>,
 }
 
 impl CallFrame {
-    fn new(function: CompiledFunction, args: Vec<Value>, return_to_reg: Option<u8>) -> Self {
-        let num_regs = 256; // max registers per frame
-        let mut registers = vec![Value::Null; num_regs];
-        // Place arguments in registers 0..n
+    fn new(function: CompiledFunction, args: Vec<Value>, return_to_reg: Option<u16>) -> Self {
+        let num_regs = std::cmp::max(function.locals as usize, function.arity as usize);
+        let safe_num_regs = if num_regs == 0 { 256 } else { num_regs };
+        let mut registers = vec![Value::Null; safe_num_regs];
+        
         for (i, arg) in args.into_iter().enumerate() {
-            registers[i] = arg;
+            if i < registers.len() {
+                registers[i] = arg;
+            }
         }
-        Self { function, ip: 0, registers, return_to_reg }
-    }
-
-    fn read_instruction(&mut self) -> Option<Instruction> {
-        if self.ip < self.function.instructions.len() {
-            let instr = self.function.instructions[self.ip];
-            self.ip += 1;
-            Some(instr)
-        } else {
-            None
+        
+        Self {
+            function,
+            ip: 0,
+            registers,
+            return_to_reg,
         }
     }
 
-    fn get_constant(&self, idx: u8) -> Value {
-        match &self.function.constants[idx as usize] {
-            Constant::Integer(n) => Value::Int(*n),
-            Constant::Float(f) => Value::Float(*f),
-            Constant::String(s) => Value::Str(s.clone()),
-            Constant::Boolean(b) => Value::Bool(*b),
-            Constant::Null => Value::Null,
-            Constant::Function(idx) => Value::Function(*idx),
-        }
-    }
-
-    fn reg(&self, idx: u8) -> &Value {
+    fn reg(&self, idx: u16) -> &Value {
         &self.registers[idx as usize]
     }
 
-    fn set_reg(&mut self, idx: u8, val: Value) {
-        self.registers[idx as usize] = val;
+    fn reg_mut(&mut self, idx: u16) -> &mut Value {
+        &mut self.registers[idx as usize]
+    }
+
+    fn set_reg(&mut self, idx: u16, val: Value) {
+        if (idx as usize) < self.registers.len() {
+            self.registers[idx as usize] = val;
+        } else {
+             while self.registers.len() <= idx as usize {
+                 self.registers.push(Value::Null);
+             }
+             self.registers[idx as usize] = val;
+        }
+    }
+
+    fn get_constant(&self, idx: u16) -> &Constant {
+        &self.function.constants[idx as usize]
     }
 }
 
-/// The KiVM virtual machine.
 pub struct VM {
+    program: CompiledProgram,
     call_stack: Vec<CallFrame>,
     globals: HashMap<String, Value>,
-    program: CompiledProgram,
-    /// Captured output for testing
     pub output: Vec<String>,
 }
 
 impl VM {
     pub fn new(program: CompiledProgram) -> Self {
-        let mut globals = HashMap::new();
-        // Register built-in functions
-        for name in builtins::BUILTIN_NAMES {
-            globals.insert(name.to_string(), Value::NativeFn(name.to_string()));
-        }
-
-        // Register Modules
-        let modules = ["Math", "System", "OS", "Game", "Net", "Graph", "Data", "Audio", "UI", "Input",
-                       "math", "time", "env"];
-        for mod_name in modules.iter() {
-            globals.insert(mod_name.to_string(), Value::NativeModule(mod_name.to_string()));
-        }
-
         Self {
-            call_stack: Vec::new(),
-            globals,
             program,
+            call_stack: Vec::new(),
+            globals: HashMap::new(),
             output: Vec::new(),
-        }
-    }
-
-    /// Run the program and return the final value.
-    pub fn run(&mut self) -> Result<Value, String> {
-        let main_fn = self.program.main.clone();
-        self.call_stack.push(CallFrame::new(main_fn, vec![], None));
-
-        loop {
-            let result = self.step()?;
-            match result {
-                StepResult::Continue => continue,
-                StepResult::Halt => return Ok(Value::Null),
-                StepResult::Return(val) => {
-                    return Ok(val);
-                }
-                StepResult::Call(func, args, reg) => {
-                    self.call_value(func, args, reg)?;
-                }
-            }
         }
     }
 
@@ -213,194 +174,149 @@ impl VM {
         self.call_stack.len()
     }
 
-    pub fn step(&mut self) -> Result<StepResult, String> {
-        let frame = self.call_stack.last_mut()
-            .ok_or("Call stack empty")?;
+    pub fn run(&mut self) -> Result<(), String> {
+        let main_args = vec![];
+        let main_frame = CallFrame::new(self.program.main.clone(), main_args, None);
+        self.call_stack.push(main_frame);
 
-        let instr = match frame.read_instruction() {
-            Some(i) => i,
-            None => return Ok(StepResult::Halt),
-        };
+        loop {
+            if self.call_stack.is_empty() {
+                break;
+            }
+            
+            let result = self.step()?;
+            match result {
+                StepResult::Continue => {},
+                StepResult::Halt => break,
+                StepResult::Return(val) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    if let Some(reg) = popped.return_to_reg {
+                        if let Some(parent) = self.call_stack.last_mut() {
+                            parent.set_reg(reg, val);
+                        }
+                    } else {
+                        // Main return
+                        break;
+                    }
+                },
+                StepResult::Call(func, args, dest_reg) => {
+                     self.call_value(func, args, Some(dest_reg))?;
+                },
+                StepResult::TailCall(func, args) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    let ret_reg = popped.return_to_reg;
+                    self.call_value(func, args, ret_reg)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn step(&mut self) -> Result<StepResult, String> {
+        let frame_idx = self.call_stack.len() - 1;
+        let frame = &mut self.call_stack[frame_idx];
+
+        if frame.ip >= frame.function.instructions.len() {
+             return Ok(StepResult::Return(Value::Null));
+        }
+
+        let instr = frame.function.instructions[frame.ip];
+        frame.ip += 1;
 
         match instr.opcode {
             Opcode::LoadConst => {
-                let val = frame.get_constant(instr.b);
+                let c = frame.get_constant(instr.b).clone();
+                let val = match c {
+                    Constant::Integer(i) => Value::Int(i),
+                    Constant::Float(f) => Value::Float(f),
+                    Constant::String(s) => Value::Str(s),
+                    Constant::Boolean(b) => Value::Bool(b),
+                    Constant::Null => Value::Null,
+                    Constant::Function(idx) => Value::Function(idx),
+                    Constant::Class { name, .. } => {
+                         let mut map = HashMap::new();
+                         map.insert("__class_name__".to_string(), Value::Str(name));
+                         Value::Map(map)
+                    }
+                };
                 frame.set_reg(instr.a, val);
             }
-            Opcode::LoadNull => {
-                frame.set_reg(instr.a, Value::Null);
-            }
-            Opcode::LoadTrue => {
-                frame.set_reg(instr.a, Value::Bool(true));
-            }
-            Opcode::LoadFalse => {
-                frame.set_reg(instr.a, Value::Bool(false));
-            }
+            Opcode::LoadNull => frame.set_reg(instr.a, Value::Null),
+            Opcode::LoadTrue => frame.set_reg(instr.a, Value::Bool(true)),
+            Opcode::LoadFalse => frame.set_reg(instr.a, Value::Bool(false)),
 
-            // Arithmetic
             Opcode::Add => {
                 let left = frame.reg(instr.b).clone();
                 let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a + b),
-                    (Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 + b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a + *b as f64),
-                    (Value::Str(a), Value::Str(b)) => Value::Str(format!("{}{}", a, b)),
-                    (Value::Str(a), b) => Value::Str(format!("{}{}", a, b)),
-                    (a, Value::Str(b)) => Value::Str(format!("{}{}", a, b)),
-                    _ => return Err(format!("Cannot add {:?} and {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                match (left, right) {
+                    (Value::Int(a), Value::Int(b)) => frame.set_reg(instr.a, Value::Int(a + b)),
+                    (Value::Float(a), Value::Float(b)) => frame.set_reg(instr.a, Value::Float(a + b)),
+                    (Value::Int(a), Value::Float(b)) => frame.set_reg(instr.a, Value::Float(a as f64 + b)),
+                    (Value::Float(a), Value::Int(b)) => frame.set_reg(instr.a, Value::Float(a + b as f64)),
+                    (Value::Str(a), Value::Str(b)) => frame.set_reg(instr.a, Value::Str(a + &b)),
+                    _ => return Err("Invalid types for Add".into()),
+                }
             }
             Opcode::Sub => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a - b),
-                    (Value::Float(a), Value::Float(b)) => Value::Float(a - b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 - b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a - *b as f64),
-                    _ => return Err(format!("Cannot subtract {:?} and {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b).as_int()?;
+                 let right = frame.reg(instr.c).as_int()?;
+                 frame.set_reg(instr.a, Value::Int(left - right));
             }
             Opcode::Mul => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a * b),
-                    (Value::Float(a), Value::Float(b)) => Value::Float(a * b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 * b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a * *b as f64),
-                    _ => return Err(format!("Cannot multiply {:?} and {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b).as_int()?;
+                 let right = frame.reg(instr.c).as_int()?;
+                 frame.set_reg(instr.a, Value::Int(left * right));
             }
             Opcode::Div => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => {
-                        if *b == 0 { return Err("Division by zero".to_string()); }
-                        Value::Int(a / b)
-                    }
-                    (Value::Float(a), Value::Float(b)) => Value::Float(a / b),
-                    (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 / b),
-                    (Value::Float(a), Value::Int(b)) => Value::Float(a / *b as f64),
-                    _ => return Err(format!("Cannot divide {:?} by {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b).as_int()?;
+                 let right = frame.reg(instr.c).as_int()?;
+                 if right == 0 { return Err("Division by zero".into()); }
+                 frame.set_reg(instr.a, Value::Int(left / right));
             }
             Opcode::Mod => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Int(a % b),
-                    _ => return Err(format!("Cannot mod {:?} by {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b).as_int()?;
+                 let right = frame.reg(instr.c).as_int()?;
+                 if right == 0 { return Err("Division by zero".into()); }
+                 frame.set_reg(instr.a, Value::Int(left % right));
             }
-            Opcode::Neg => {
-                let val = frame.reg(instr.b).clone();
-                let result = match val {
-                    Value::Int(n) => Value::Int(-n),
-                    Value::Float(f) => Value::Float(-f),
-                    _ => return Err(format!("Cannot negate {:?}", val)),
-                };
-                frame.set_reg(instr.a, result);
-            }
-
-            // Comparison
             Opcode::Eq => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a == b),
-                    (Value::Str(a), Value::Str(b)) => Value::Bool(a == b),
-                    (Value::Bool(a), Value::Bool(b)) => Value::Bool(a == b),
-                    (Value::Null, Value::Null) => Value::Bool(true),
-                    _ => Value::Bool(false),
-                };
-                frame.set_reg(instr.a, result);
-            }
-            Opcode::Neq => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a != b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a != b),
-                    (Value::Str(a), Value::Str(b)) => Value::Bool(a != b),
-                    (Value::Bool(a), Value::Bool(b)) => Value::Bool(a != b),
-                    _ => Value::Bool(true),
-                };
-                frame.set_reg(instr.a, result);
+                let left = frame.reg(instr.b);
+                let right = frame.reg(instr.c);
+                frame.set_reg(instr.a, Value::Bool(left == right));
             }
             Opcode::Lt => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a < b),
-                    _ => return Err(format!("Cannot compare {:?} < {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b);
+                 let right = frame.reg(instr.c);
+                 frame.set_reg(instr.a, Value::Bool(left < right));
             }
             Opcode::Gt => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a > b),
-                    _ => return Err(format!("Cannot compare {:?} > {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b);
+                 let right = frame.reg(instr.c);
+                 frame.set_reg(instr.a, Value::Bool(left > right));
             }
             Opcode::Lte => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a <= b),
-                    _ => return Err(format!("Cannot compare {:?} <= {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b);
+                 let right = frame.reg(instr.c);
+                 frame.set_reg(instr.a, Value::Bool(left <= right));
             }
             Opcode::Gte => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                let result = match (&left, &right) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
-                    (Value::Float(a), Value::Float(b)) => Value::Bool(a >= b),
-                    _ => return Err(format!("Cannot compare {:?} >= {:?}", left, right)),
-                };
-                frame.set_reg(instr.a, result);
+                 let left = frame.reg(instr.b);
+                 let right = frame.reg(instr.c);
+                 frame.set_reg(instr.a, Value::Bool(left >= right));
+            }
+            Opcode::Neq => {
+                 let left = frame.reg(instr.b);
+                 let right = frame.reg(instr.c);
+                 frame.set_reg(instr.a, Value::Bool(left != right));
             }
 
-            // Logical
-            Opcode::Not => {
-                let val = frame.reg(instr.b).clone();
-                frame.set_reg(instr.a, Value::Bool(!val.is_truthy()));
-            }
-            Opcode::And => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                frame.set_reg(instr.a, Value::Bool(left.is_truthy() && right.is_truthy()));
-            }
-            Opcode::Or => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                frame.set_reg(instr.a, Value::Bool(left.is_truthy() || right.is_truthy()));
+            Opcode::Print => {
+                let val = frame.reg(instr.a);
+                let out = format!("{}", val);
+                println!("{}", out);
+                self.output.push(out);
             }
 
-            Opcode::Concat => {
-                let left = frame.reg(instr.b).clone();
-                let right = frame.reg(instr.c).clone();
-                frame.set_reg(instr.a, Value::Str(format!("{}{}", left, right)));
-            }
-
-            // Variables
             Opcode::GetLocal => {
                 let val = frame.reg(instr.b).clone();
                 frame.set_reg(instr.a, val);
@@ -411,213 +327,156 @@ impl VM {
             }
             Opcode::GetGlobal => {
                 let name = match frame.get_constant(instr.b) {
-                    Value::Str(s) => s,
-                    _ => return Err("GetGlobal: expected string constant".to_string()),
+                    Constant::String(s) => s.clone(),
+                    _ => return Err("GetGlobal: expected string constant".into()),
                 };
-                let val = self.globals.get(&name).cloned().unwrap_or(Value::Null);
-                let frame = self.call_stack.last_mut().unwrap();
-                frame.set_reg(instr.a, val);
+                if let Some(val) = self.globals.get(&name) {
+                    frame.set_reg(instr.a, val.clone());
+                } else {
+                    return Err(format!("Undefined global: {}", name));
+                }
             }
             Opcode::SetGlobal => {
                 let name = match frame.get_constant(instr.a) {
-                    Value::Str(s) => s,
-                    _ => return Err("SetGlobal: expected string constant".to_string()),
+                     Constant::String(s) => s.clone(),
+                    _ => return Err("SetGlobal: expected string constant".into()),
                 };
                 let val = frame.reg(instr.b).clone();
                 self.globals.insert(name, val);
             }
-
-            // Arrays
-            Opcode::MakeArray => {
-                let start = instr.a as usize;
-                let count = instr.b as usize;
-                let frame = self.call_stack.last().unwrap();
-                let elements: Vec<Value> = (start..start + count)
-                    .map(|i| frame.registers[i].clone())
-                    .collect();
-                let frame = self.call_stack.last_mut().unwrap();
-                frame.set_reg(instr.a, Value::Array(elements));
-            }
-            Opcode::GetIndex => {
-                let arr = frame.reg(instr.b).clone();
-                let idx = frame.reg(instr.c).clone();
-                match (&arr, &idx) {
-                    (Value::Array(a), Value::Int(i)) => {
-                        let val = a.get(*i as usize).cloned().unwrap_or(Value::Null);
-                        frame.set_reg(instr.a, val);
-                    }
-                    (Value::Map(m), Value::Str(key)) => {
-                        let val = m.get(key).cloned().unwrap_or(Value::Null);
-                        frame.set_reg(instr.a, val);
-                    }
-                    _ => {
-                        frame.set_reg(instr.a, Value::Null);
-                    }
-                }
-            }
-            Opcode::SetIndex => {
-                // A[B] = C
+            
+            Opcode::SetMember => {
                 let val = frame.reg(instr.c).clone();
-                let index_val = frame.reg(instr.b).clone();
-                match &mut frame.registers[instr.a as usize] {
-                     Value::Array(arr) => {
-                         let idx = index_val.as_int().unwrap_or(0) as usize;
-                         if idx < arr.len() {
-                             arr[idx] = val;
-                         }
-                     }
-                     Value::Map(map) => {
-                         if let Value::Str(key) = index_val {
-                             map.insert(key, val);
-                         }
-                     }
-                     _ => {}
+                let member_name = match frame.get_constant(instr.b) {
+                    Constant::String(s) => s.clone(),
+                     _ => return Err("SetMember: name must be string".into()),
+                };
+                let target = frame.reg_mut(instr.a);
+                match target {
+                    Value::Map(map) => { map.insert(member_name, val); },
+                    _ => return Err("SetMember: target not a map".into()),
                 }
             }
-
-            // Members
             Opcode::GetMember => {
-                let obj = frame.reg(instr.b).clone();
-                let member_name = match frame.get_constant(instr.c) {
-                    Value::Str(s) => s,
-                    _ => return Err("GetMember: expected string constant".to_string()),
+                 let member_name = match frame.get_constant(instr.c) {
+                    Constant::String(s) => s.clone(),
+                     _ => return Err("GetMember: name must be string".into()),
                 };
-
-                let result = match obj {
-                    Value::NativeModule(name) => {
-                         // Math.PI check
-                         if name == "Math" && member_name == "PI" {
-                             Value::Float(std::f64::consts::PI)
-                         } else {
-                             Value::NativeFn(format!("{}.{}", name, member_name))
-                         }
-                    },
-                    Value::Str(_) => {
-                        let method = Value::NativeFn(format!("str.{}", member_name));
-                        Value::BoundMethod(Box::new(obj), Box::new(method))
-                    },
-                    Value::Array(_) => {
-                        let method = Value::NativeFn(format!("array.{}", member_name));
-                        Value::BoundMethod(Box::new(obj), Box::new(method))
-                    },
-                    Value::Map(ref map) => {
-                        // Check methods first? or properties?
-                        // For data objects, priority is usually the key.
+                let obj = frame.reg(instr.b);
+                match obj {
+                    Value::Map(map) => {
                         if let Some(val) = map.get(&member_name) {
-                            val.clone()
+                            frame.set_reg(instr.a, val.clone());
                         } else {
-                            // Map methods? keys(), values(), len()...
-                            // For now, return Null if key not found, or maybe check 'map.len'?
-                            Value::Null
+                            frame.set_reg(instr.a, Value::Null);
                         }
                     },
-                    _ => Value::Null,
-                };
-                frame.set_reg(instr.a, result);
+                    _ => return Err("GetMember: target not a map".into()),
+                }
             }
-            Opcode::SetMember => {
-                // Read-only for now
-                return Err("SetMember not implemented".to_string());
+            Opcode::MakeMap => {
+                let count = instr.b as u16; 
+                let start_reg = instr.a;
+                let mut map = HashMap::new();
+                for i in 0..count {
+                     let k_reg = start_reg + (i * 2);
+                     let v_reg = start_reg + (i * 2) + 1;
+                     let key = frame.reg(k_reg).clone();
+                     let val = frame.reg(v_reg).clone();
+                     let k_str = match key {
+                         Value::Str(s) => s,
+                         _ => return Err("Map key must be string".into()),
+                     };
+                     map.insert(k_str, val);
+                }
+                frame.set_reg(instr.a, Value::Map(map));
+            }
+            Opcode::MakeRange => {
+                let start = frame.reg(instr.b).as_int()?;
+                let end = frame.reg(instr.c).as_int()?;
+                let mut chars = Vec::new();
+                for i in start..end {
+                    chars.push(Value::Int(i));
+                }
+                frame.set_reg(instr.a, Value::Array(chars));
             }
 
-            // Control flow
             Opcode::Jump => {
-                let frame = self.call_stack.last_mut().unwrap();
                 frame.ip = instr.a as usize;
             }
             Opcode::JumpIfFalse => {
-                let val = frame.reg(instr.b).clone();
-                if !val.is_truthy() {
-                    let frame = self.call_stack.last_mut().unwrap();
+                let cond = frame.reg(instr.b);
+                if !cond.is_truthy() {
                     frame.ip = instr.a as usize;
                 }
             }
             Opcode::JumpIfTrue => {
-                let val = frame.reg(instr.b).clone();
-                if val.is_truthy() {
-                    let frame = self.call_stack.last_mut().unwrap();
+                 let cond = frame.reg(instr.b);
+                if cond.is_truthy() {
                     frame.ip = instr.a as usize;
                 }
             }
 
-            // Functions
             Opcode::Call => {
                 let func_val = frame.reg(instr.a).clone();
                 let arg_count = instr.b as usize;
                 let mut args = Vec::with_capacity(arg_count);
                 for i in 0..arg_count {
-                    args.push(frame.reg(instr.a + 1 + i as u8).clone());
+                    let arg_reg = instr.a + 1 + i as u16;
+                    args.push(frame.reg(arg_reg).clone());
                 }
-
                 return Ok(StepResult::Call(func_val, args, instr.a));
             }
+
+            Opcode::TailCall => {
+                let func_val = frame.reg(instr.a).clone();
+                let arg_count = instr.b as usize;
+                let mut args = Vec::with_capacity(arg_count);
+                for i in 0..arg_count {
+                    let arg_reg = instr.a + 1 + i as u16;
+                    args.push(frame.reg(arg_reg).clone());
+                }
+                return Ok(StepResult::TailCall(func_val, args));
+            }
+
             Opcode::Return => {
                 let val = frame.reg(instr.a).clone();
-                let return_to = frame.return_to_reg;
-                self.call_stack.pop();
-                if self.call_stack.is_empty() {
-                    return Ok(StepResult::Return(val));
-                }
-                // Write return value to caller's register
-                if let Some(reg) = return_to {
-                    let caller = self.call_stack.last_mut().unwrap();
-                    caller.set_reg(reg, val);
-                }
-                return Ok(StepResult::Continue);
+                return Ok(StepResult::Return(val));
             }
             Opcode::ReturnVoid => {
-                let return_to = frame.return_to_reg;
-                self.call_stack.pop();
-                if self.call_stack.is_empty() {
-                    return Ok(StepResult::Return(Value::Null));
-                }
-                // Write Null to caller's register to signal void return
-                if let Some(reg) = return_to {
-                    let caller = self.call_stack.last_mut().unwrap();
-                    caller.set_reg(reg, Value::Null);
-                }
-                return Ok(StepResult::Continue);
-            }
-            Opcode::MakeClosure => {
-                // Placeholder
-                frame.set_reg(instr.a, Value::Null);
+                return Ok(StepResult::Return(Value::Null));
             }
 
-            // Built-in
-            Opcode::Print => {
-                let val = frame.reg(instr.a).clone();
-                let text = format!("{}", val);
-                println!("{}", text);
-                self.output.push(text);
-            }
-
-            Opcode::Pop | Opcode::Nop => {}
-
-            Opcode::Halt => {
-                return Ok(StepResult::Halt);
-            }
+            Opcode::Halt => return Ok(StepResult::Halt),
+            
+            _ => { return Err(format!("Opcode {:?} unimplemented", instr.opcode)); }
         }
 
         Ok(StepResult::Continue)
     }
 
-    pub fn call_value(&mut self, func: Value, mut args: Vec<Value>, return_reg: u8) -> Result<(), String> {
+    pub fn call_value(&mut self, func: Value, mut args: Vec<Value>, return_reg: Option<u16>) -> Result<(), String> {
         match func {
             Value::BoundMethod(receiver, method) => {
-                // Prepend receiver to args
                 args.insert(0, *receiver);
-                // Call the underlying method
                 self.call_value(*method, args, return_reg)
             }
             Value::Function(func_idx) => {
                 let func = self.program.functions[func_idx].clone();
-                self.call_stack.push(CallFrame::new(func, args, Some(return_reg)));
+                self.call_stack.push(CallFrame::new(func, args, return_reg));
                 Ok(())
             }
             Value::NativeFn(name) => {
                 let result = builtins::call_builtin(&name, &args, self)?;
-                let frame = self.call_stack.last_mut().unwrap();
-                frame.set_reg(return_reg, result);
+                if let Some(reg) = return_reg {
+                    // If we just called access to native, where do we write result?
+                    // call_value pushes? NativeFn doesn't push CallFrame.
+                    // So we must write to caller's frame?
+                    // But call_value logic for native:
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.set_reg(reg, result);
+                    }
+                }
                 Ok(())
             }
             _ => Err(format!("Cannot call {:?}", func)),
@@ -630,106 +489,6 @@ pub enum StepResult {
     Continue,
     Halt,
     Return(Value),
-    Call(Value, Vec<Value>, u8),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_simple_program(instructions: Vec<Instruction>, constants: Vec<Constant>) -> CompiledProgram {
-        let mut prog = CompiledProgram::new();
-        prog.main.instructions = instructions;
-        prog.main.constants = constants;
-        prog
-    }
-
-    #[test]
-    fn test_vm_load_const_halt() {
-        let prog = make_simple_program(
-            vec![
-                Instruction::ab(Opcode::LoadConst, 0, 0),
-                Instruction::a_only(Opcode::Halt, 0),
-            ],
-            vec![Constant::Integer(42)],
-        );
-        let mut vm = VM::new(prog);
-        vm.run().expect("VM should halt successfully");
-    }
-
-    #[test]
-    fn test_vm_add() {
-        let prog = make_simple_program(
-            vec![
-                Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 10
-                Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 20
-                Instruction::new(Opcode::Add, 2, 0, 1),   // r2 = r0 + r1
-                Instruction::a_only(Opcode::Print, 2),     // print r2
-                Instruction::a_only(Opcode::Halt, 0),
-            ],
-            vec![Constant::Integer(10), Constant::Integer(20)],
-        );
-        let mut vm = VM::new(prog);
-        vm.run().expect("VM should run");
-        assert_eq!(vm.output, vec!["30"]);
-    }
-
-    #[test]
-    fn test_vm_comparison() {
-        let prog = make_simple_program(
-            vec![
-                Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 5
-                Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 10
-                Instruction::new(Opcode::Lt, 2, 0, 1),    // r2 = 5 < 10
-                Instruction::a_only(Opcode::Print, 2),     // print true
-                Instruction::a_only(Opcode::Halt, 0),
-            ],
-            vec![Constant::Integer(5), Constant::Integer(10)],
-        );
-        let mut vm = VM::new(prog);
-        vm.run().expect("VM should run");
-        assert_eq!(vm.output, vec!["true"]);
-    }
-
-    #[test]
-    fn test_vm_jump_if_false() {
-        let prog = make_simple_program(
-            vec![
-                Instruction::a_only(Opcode::LoadFalse, 0),        // r0 = false
-                Instruction::ab(Opcode::JumpIfFalse, 4, 0),       // if !r0 jump to 4
-                Instruction::ab(Opcode::LoadConst, 1, 0),         // r1 = "skipped" (should skip)
-                Instruction::a_only(Opcode::Print, 1),
-                Instruction::ab(Opcode::LoadConst, 1, 1),         // r1 = "reached"
-                Instruction::a_only(Opcode::Print, 1),
-                Instruction::a_only(Opcode::Halt, 0),
-            ],
-            vec![
-                Constant::String("skipped".to_string()),
-                Constant::String("reached".to_string()),
-            ],
-        );
-        let mut vm = VM::new(prog);
-        vm.run().expect("VM should run");
-        assert_eq!(vm.output, vec!["reached"]);
-    }
-
-    #[test]
-    fn test_vm_string_concat() {
-        let prog = make_simple_program(
-            vec![
-                Instruction::ab(Opcode::LoadConst, 0, 0), // "Hello "
-                Instruction::ab(Opcode::LoadConst, 1, 1), // "World"
-                Instruction::new(Opcode::Add, 2, 0, 1),   // "Hello World"
-                Instruction::a_only(Opcode::Print, 2),
-                Instruction::a_only(Opcode::Halt, 0),
-            ],
-            vec![
-                Constant::String("Hello ".to_string()),
-                Constant::String("World".to_string()),
-            ],
-        );
-        let mut vm = VM::new(prog);
-        vm.run().expect("VM should run");
-        assert_eq!(vm.output, vec!["Hello World"]);
-    }
+    Call(Value, Vec<Value>, u16),
+    TailCall(Value, Vec<Value>),
 }

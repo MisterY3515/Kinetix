@@ -198,7 +198,7 @@ pub fn call(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, String> {
                 }
 
                 if let Some(ref cb) = callback {
-                     if let Err(e) = vm.call_value(cb.clone(), vec![], 0) {
+                     if let Err(e) = vm.call_value(cb.clone(), vec![], Some(0)) {
                          eprintln!("UI Callback Error: {}", e);
                      }
                      let target_depth = vm.call_stack_len() - 1; 
