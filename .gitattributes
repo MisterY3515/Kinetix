@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Escludere tutti i Makefile
+Makefile linguist-detectable=false
+*/Makefile linguist-detectable=false
