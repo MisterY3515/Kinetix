@@ -8,6 +8,7 @@ use kinetix_kicomp::compiler::Compiler;
 use kinetix_kicomp::exn;
 use std::fs;
 use std::path::PathBuf;
+use bumpalo::Bump;
 
 #[derive(ClapParser)]
 #[command(name = "kicomp")]
@@ -37,7 +38,8 @@ fn main() {
     let lexer = Lexer::new(&source);
 
     // Parse
-    let mut parser = Parser::new(lexer);
+    let arena = Bump::new();
+    let mut parser = Parser::new(lexer, &arena);
     let program = parser.parse_program();
 
     if !parser.errors.is_empty() {

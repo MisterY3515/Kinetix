@@ -55,7 +55,7 @@ impl Compiler {
     }
 
     /// Compile a full program (list of statements).
-    pub fn compile(&mut self, statements: &[Statement]) -> Result<&CompiledProgram, String> {
+    pub fn compile(&mut self, statements: &[Statement<'_>]) -> Result<&CompiledProgram, String> {
         for stmt in statements {
             self.compile_statement(stmt)?;
             if let Some(scope) = self.scopes.last() {
@@ -114,7 +114,7 @@ impl Compiler {
 
     // ========== Statements ==========
 
-    fn compile_statement(&mut self, stmt: &Statement) -> Result<(), String> {
+    fn compile_statement(&mut self, stmt: &Statement<'_>) -> Result<(), String> {
         match stmt {
             Statement::Let { name, value, mutable: _, type_hint: _ } => {
                 let reg = self.compile_expression(value)?;
@@ -185,7 +185,7 @@ impl Compiler {
         &mut self,
         name: &str,
         parameters: &[(String, String)],
-        body: &Statement,
+        body: &Statement<'_>,
     ) -> Result<(), String> {
         let mut func = CompiledFunction::new(name.to_string(), parameters.len() as u16);
         func.param_names = parameters.iter().map(|(n, _)| n.clone()).collect();
@@ -243,7 +243,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_while(&mut self, condition: &Expression, body: &Statement) -> Result<(), String> {
+    fn compile_while(&mut self, condition: &Expression<'_>, body: &Statement<'_>) -> Result<(), String> {
         let loop_start = self.current_fn().instructions.len();
         let cond_reg = self.compile_expression(condition)?;
         let jump_idx = self.current_fn().emit(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
@@ -264,7 +264,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_for(&mut self, variable: &str, iterable: &Expression, body: &Statement) -> Result<(), String> {
+    fn compile_for(&mut self, variable: &str, iterable: &Expression<'_>, body: &Statement<'_>) -> Result<(), String> {
         let iter_reg = self.compile_expression(iterable)?;
         let idx_reg = self.alloc_register();
         let var_reg = self.current_scope_mut().define(variable);
@@ -297,7 +297,7 @@ impl Compiler {
 
     // ========== Expressions ==========
 
-    fn compile_expression(&mut self, expr: &Expression) -> Result<u16, String> {
+    fn compile_expression(&mut self, expr: &Expression<'_>) -> Result<u16, String> {
         match expr {
             Expression::Integer(val) => {
                 let reg = self.alloc_register();
@@ -374,7 +374,7 @@ impl Compiler {
             }
             Expression::Assign { target, value } => {
                 let val_reg = self.compile_expression(value)?;
-                match target.as_ref() {
+                match target {
                     Expression::Identifier(name) => {
                         if let Some(slot) = self.resolve_assign(name) {
                             self.current_fn().emit(Instruction::ab(Opcode::SetLocal, slot, val_reg));
@@ -399,7 +399,7 @@ impl Compiler {
             }
             Expression::Call { function, arguments } => {
                 // Intrinsic: print(x)
-                if let Expression::Identifier(name) = function.as_ref() {
+                if let Expression::Identifier(name) = *function {
                     if name == "print" && arguments.len() == 1 {
                         let arg_reg = self.compile_expression(&arguments[0])?;
                         self.current_fn().emit(Instruction::a_only(Opcode::Print, arg_reg));
@@ -430,7 +430,7 @@ impl Compiler {
                 let result_reg = self.alloc_register();
                 let jump_else = self.current_fn().emit(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
 
-                if let Statement::Block { statements } = consequence.as_ref() {
+                if let Statement::Block { statements } = *consequence {
                     for s in statements {
                         self.compile_statement(s)?;
                     }
@@ -441,7 +441,7 @@ impl Compiler {
                     let else_pos = self.current_fn().instructions.len();
                     self.current_fn().instructions[jump_else].a = else_pos as u16;
 
-                    if let Statement::Block { statements } = alt.as_ref() {
+                    if let Statement::Block { statements } = *alt {
                         for s in statements {
                             self.compile_statement(s)?;
                         }

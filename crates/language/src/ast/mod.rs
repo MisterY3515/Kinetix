@@ -1,40 +1,41 @@
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Statement {
+
+#[derive(Debug)]
+pub enum Statement<'a> {
     Let {
         name: String,
         mutable: bool,
         type_hint: Option<String>,
-        value: Expression,
+        value: Expression<'a>,
     },
     Return {
-        value: Option<Expression>,
+        value: Option<Expression<'a>>,
     },
     Expression {
-        expression: Expression,
+        expression: Expression<'a>,
     },
     Block {
-        statements: Vec<Statement>,
+        statements: Vec<Statement<'a>>,
     },
     Function {
         name: String,
         parameters: Vec<(String, String)>, // (name, type)
-        body: Box<Statement>, // Block
+        body: &'a Statement<'a>, // Block
         return_type: String,
     },
     While {
-        condition: Expression,
-        body: Box<Statement>,
+        condition: Expression<'a>,
+        body: &'a Statement<'a>,
     },
     For {
         iterator: String,
-        range: Expression,
-        body: Box<Statement>,
+        range: Expression<'a>,
+        body: &'a Statement<'a>,
     },
     Class {
         name: String,
         parent: Option<String>,
-        methods: Vec<Statement>, // Function statements
+        methods: Vec<Statement<'a>>, // Function statements
         fields: Vec<(bool, String, String)>, // (is_public, name, type)
     },
     Struct {
@@ -52,8 +53,8 @@ pub enum Statement {
     Continue,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Expression {
+#[derive(Debug)]
+pub enum Expression<'a> {
     Identifier(String),
     Integer(i64),
     Float(f64),
@@ -62,57 +63,57 @@ pub enum Expression {
     Null,
     Prefix {
         operator: String,
-        right: Box<Expression>,
+        right: &'a Expression<'a>,
     },
     Infix {
-        left: Box<Expression>,
+        left: &'a Expression<'a>,
         operator: String,
-        right: Box<Expression>,
+        right: &'a Expression<'a>,
     },
     If {
-        condition: Box<Expression>,
-        consequence: Box<Statement>, // Block
-        alternative: Option<Box<Statement>>, // Also Block
+        condition: &'a Expression<'a>,
+        consequence: &'a Statement<'a>, // Block
+        alternative: Option<&'a Statement<'a>>, // Also Block
     },
     Call {
-        function: Box<Expression>,
-        arguments: Vec<Expression>,
+        function: &'a Expression<'a>,
+        arguments: Vec<Expression<'a>>,
     },
     FunctionLiteral {
         parameters: Vec<(String, String)>,
-        body: Box<Statement>,
+        body: &'a Statement<'a>,
         return_type: String,
     },
-    ArrayLiteral(Vec<Expression>),
-    MapLiteral(Vec<(Expression, Expression)>),
+    ArrayLiteral(Vec<Expression<'a>>),
+    MapLiteral(Vec<(Expression<'a>, Expression<'a>)>),
     Index {
-        left: Box<Expression>,
-        index: Box<Expression>,
+        left: &'a Expression<'a>,
+        index: &'a Expression<'a>,
     },
     MemberAccess {
-        object: Box<Expression>,
+        object: &'a Expression<'a>,
         member: String,
     },
     Assign {
-        target: Box<Expression>,
-        value: Box<Expression>,
+        target: &'a Expression<'a>,
+        value: &'a Expression<'a>,
     },
     Match {
-        value: Box<Expression>,
-        arms: Vec<(Expression, Box<Statement>)>, 
+        value: &'a Expression<'a>,
+        arms: Vec<(Expression<'a>, &'a Statement<'a>)>, 
     },
     Range {
-        start: Box<Expression>,
-        end: Box<Expression>,
+        start: &'a Expression<'a>,
+        end: &'a Expression<'a>,
     },
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct Program {
-    pub statements: Vec<Statement>,
+#[derive(Debug)]
+pub struct Program<'a> {
+    pub statements: Vec<Statement<'a>>,
 }
 
-impl Program {
+impl<'a> Program<'a> {
     pub fn new() -> Self {
         Program { statements: vec![] }
     }

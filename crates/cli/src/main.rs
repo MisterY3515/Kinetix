@@ -7,6 +7,7 @@ use kinetix_kivm::vm::VM;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use bumpalo::Bump;
 
 // Magic signature for bundled executables (17 bytes)
 const BUNDLE_SIGNATURE: &[u8] = b"KINETIX_BUNDLE_V1";
@@ -139,7 +140,8 @@ fn run() -> Result<(), String> {
             use kinetix_kicomp::compiler::Compiler;
 
             let lexer = kinetix_language::lexer::Lexer::new(&source);
-            let mut parser = kinetix_language::parser::Parser::new(lexer);
+            let arena = Bump::new();
+            let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
             let ast = parser.parse_program();
 
             if !parser.errors.is_empty() {
@@ -164,7 +166,8 @@ fn run() -> Result<(), String> {
             use kinetix_kicomp::compiler::Compiler;
 
             let lexer = kinetix_language::lexer::Lexer::new(&source);
-            let mut parser = kinetix_language::parser::Parser::new(lexer);
+            let arena = Bump::new();
+            let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
             let ast = parser.parse_program();
 
             if !parser.errors.is_empty() {
@@ -301,7 +304,8 @@ fn run_test_file(path: &Path) -> Result<(), String> {
 
     // 1. Lexing
     let lexer = kinetix_language::lexer::Lexer::new(&source);
-    let mut parser = kinetix_language::parser::Parser::new(lexer);
+    let arena = Bump::new();
+    let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
     let ast = parser.parse_program();
 
     if !parser.errors.is_empty() {
@@ -457,7 +461,8 @@ fn run_shell() {
                 // Try to evaluate as Kinetix source
                 let source = input.to_string();
                 let lexer = kinetix_language::lexer::Lexer::new(&source);
-                let mut parser = kinetix_language::parser::Parser::new(lexer);
+                let arena = Bump::new();
+                let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
                 let ast = parser.parse_program();
 
                 if !parser.errors.is_empty() {
