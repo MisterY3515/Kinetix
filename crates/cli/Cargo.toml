@@ -7,6 +7,10 @@ edition = "2024"
 name = "kivm"
 path = "src/main.rs"
 
+[features]
+default = []
+llvm = ["kinetix-kicomp/llvm"]
+
 [dependencies]
 kinetix-language = { path = "../language" }
 kinetix-kicomp = { path = "../kicomp" }

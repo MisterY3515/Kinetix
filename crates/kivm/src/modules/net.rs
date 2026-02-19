@@ -1,5 +1,5 @@
 use crate::vm::Value;
-use std::io::Read;
+
 use ureq;
 
 pub fn call(func_name: &str, args: &[Value]) -> Result<Value, String> {

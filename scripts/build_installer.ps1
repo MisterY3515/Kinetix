@@ -12,7 +12,7 @@ Write-Host "`n[1/3] Compiling kivm and kicomp..." -ForegroundColor Yellow
 Push-Location $root
 
 # Set build version for CLI/Comp to pick up
-$env:KINETIX_BUILD = "Build 7"
+$env:KINETIX_BUILD = "Build 8"
 
 # Clean to ensure env var is picked up
 cargo clean -p kinetix-cli -p kinetix-kicomp
@@ -29,7 +29,7 @@ Write-Host "OK" -ForegroundColor Green
 
 # Verify the built binary version
 Write-Host "Verifying built binary version..." -ForegroundColor Cyan
-& "$root\target\release\kivm.exe" --version
+& "$root\target\release\kivm.exe" version
 
 # Check that the release binaries exist
 $kivmExe = Join-Path $root "target\release\kivm.exe"
@@ -52,9 +52,10 @@ Write-Host "  kicomp.exe: $kicompExe" -ForegroundColor DarkGray
 Write-Host "`n[2/3] Compiling installer..." -ForegroundColor Yellow
 Push-Location (Join-Path $root "crates\installer")
 
-# Clean installer to ensure env vars are picked up and binaries are refreshed
-Write-Host "  Cleaning previous installer build..." -ForegroundColor DarkGray
-cargo clean
+# We don't manually delete the target folder because Windows often holds locks momentarily,
+# causing subsequent cargo builds to fail (os error 32 on zerocopy or others).
+# Instead, we just rely on cargo's caching. include_bytes! tracks file changes.
+Write-Host "  Building installer executable (UI)..." -ForegroundColor DarkGray
 
 cargo build --release
 if ($LASTEXITCODE -ne 0) {

@@ -43,6 +43,9 @@ enum Commands {
         /// Create a standalone executable (bundle)
         #[arg(long)]
         exe: bool,
+        /// Compile to native machine code (LLVM)
+        #[arg(long)]
+        native: bool,
     },
     /// Show version information
     Version,
@@ -59,22 +62,43 @@ enum Commands {
     Docs,
 }
 
+fn fatal_error(msg: &str) {
+    eprintln!("\n[Kinetix Error]\n{}", msg);
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Spawns a dedicated terminal window to ensure the error is seen,
+        // specifically fulfilling the request to "open a terminal window with the error".
+        let safe_msg = msg.replace("\"", "'").replace("\n", " & echo ");
+        let script = format!("title Kinetix Error Reporter & color 0C & echo [Kinetix Fatal Error] & echo. & echo {} & echo. & pause", safe_msg);
+        let _ = std::process::Command::new("cmd.exe")
+            .args(&["/c", &script])
+            .spawn()
+            .and_then(|mut child| child.wait());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        eprintln!("\nPress Enter to exit...");
+        let mut s = String::new();
+        let _ = std::io::stdin().read_line(&mut s);
+    }
+    std::process::exit(1);
+}
+
 fn main() {
     // 1. Check if we are running as a bundled executable
     if let Some(program) = check_for_bundle() {
         // Run the bundled program
         let mut vm = VM::new(program);
         if let Err(e) = vm.run() {
-            eprintln!("Runtime Error: {}", e);
-            std::process::exit(1);
+            fatal_error(&format!("Runtime Error: {}", e));
         }
         return;
     }
 
     // 2. Otherwise/Normal CLI mode
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
+        fatal_error(&format!("{}", e));
     }
 }
 
@@ -150,13 +174,29 @@ fn run() -> Result<(), String> {
                 return Err("Parsing failed".into());
             }
 
+            #[cfg(feature = "llvm")]
+            {
+                // Try LLVM JIT first
+                let jit_res = kinetix_kicomp::llvm_codegen::run_program_jit(&ast.statements);
+                match jit_res {
+                    Ok(_) => return Ok(()), // JIT successful
+                    Err(e) => {
+                        // JIT failed (likely due to unimplemented AST nodes in LLVM backend yet).
+                        // Fallback to KiVM.
+                        // We do not print the fallback message unless in debug mode, to avoid noise,
+                        // but since it's experimental, let's log it lightly.
+                        // eprintln!("Note: LLVM JIT not available for this script ({}). Falling back to KiVM.", e);
+                    }
+                }
+            }
+
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;
             
             let mut vm = VM::new(compiled.clone());
             vm.run().map_err(|e| format!("Runtime error: {}", e))?;
         }
-        Commands::Compile { input, output, exe } => {
+        Commands::Compile { input, output, exe, native } => {
             let source = fs::read_to_string(&input).map_err(|e| format!("Error reading {}: {}", input.display(), e))?;
             
             // Preprocess includes
@@ -178,6 +218,27 @@ fn run() -> Result<(), String> {
 
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;
+
+            if native {
+                #[cfg(feature = "llvm")]
+                {
+                    let output_path = output.unwrap_or_else(|| {
+                        // Default to .o for native object files
+                        input.with_extension("o")
+                    });
+                    
+                    println!("Compiling to native object file: {}", output_path.display());
+                    kinetix_kicomp::llvm_codegen::compile_program_to_object(&ast.statements, &output_path)
+                        .map_err(|e| format!("LLVM Codegen error: {}", e))?;
+                        
+                    println!("Native compilation successful.");
+                    return Ok(());
+                }
+                #[cfg(not(feature = "llvm"))]
+                {
+                   return Err("Native compilation requires 'llvm' feature. Rebuild with --features llvm.".to_string());
+                }
+            }
 
             if exe {
                 // Create standalone executable

@@ -8,4 +8,4 @@ src\../../../target/release/kicomp.exe:
 src\../../../assets/logo/KiFile.png:
 
 # env-dep:CARGO_PKG_VERSION=0.0.3
-# env-dep:KINETIX_BUILD=Build 7
+# env-dep:KINETIX_BUILD=Build 8

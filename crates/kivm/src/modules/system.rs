@@ -1,7 +1,6 @@
 use crate::vm::Value;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use sysinfo::{System, Networks, Disks};
+use sysinfo::System;
 
 // Lazy initialization of System info to avoid overhead on every call
 // We use a global static Mutex for simplicity in this context
@@ -12,6 +11,7 @@ lazy_static::lazy_static! {
 }
 
 // Helper to refresh and get
+#[allow(dead_code)]
 fn with_system<F, T>(f: F) -> T 
 where F: FnOnce(&mut System) -> T {
     let mut sys = SYS.lock().unwrap();

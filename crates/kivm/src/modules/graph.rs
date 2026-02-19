@@ -3,6 +3,7 @@ use minifb::{Window, WindowOptions, Key, MouseMode, MouseButton};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 
+#[allow(dead_code)]
 struct ThreadSafeWindow(Window);
 unsafe impl Send for ThreadSafeWindow {}
 unsafe impl Sync for ThreadSafeWindow {}
@@ -13,7 +14,9 @@ struct UiState {
     mouse_down: bool,
     keys_pressed: Vec<Key>,
     shift_down: bool,
+    #[allow(dead_code)]
     active_id: Option<u64>,
+    #[allow(dead_code)]
     hot_id: Option<u64>,
 }
 
@@ -31,7 +34,9 @@ lazy_static! {
 
 // Minimal 5x7 Font Data (ASCII 32-127 approx, or just 0-9 A-Z)
 // Pack 5 bytes per char. width=5.
+#[allow(dead_code)]
 const FONT_W: usize = 5;
+#[allow(dead_code)]
 const FONT_H: usize = 7;
 // A small subset for brevity: Space .. Z (ASCII 32..90)
 const FONT_DATA: &[u8] = &[
@@ -138,6 +143,7 @@ fn draw_rect(buf: &mut [u32], w: usize, h: usize, rx: usize, ry: usize, rw: usiz
     }
 }
 
+#[allow(dead_code)]
 fn map_key_to_char(k: Key) -> Option<char> {
     match k {
         Key::Space => Some(' '),
@@ -319,6 +325,60 @@ pub fn call(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, String> {
                  prev_py = py;
              }
 
+             Ok(Value::Null)
+        },
+
+        "draw_line" => {
+             let x1 = args.get(0).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let y1 = args.get(1).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let x2 = args.get(2).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let y2 = args.get(3).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let color = args.get(4).and_then(|v| v.as_int().ok()).unwrap_or(0xFFFFFF) as u32;
+
+             let width = *WIDTH.lock().unwrap() as isize;
+             let height = *HEIGHT.lock().unwrap() as isize;
+             let mut buf = BUFFER.lock().unwrap();
+
+             let dx = (x2 - x1).abs();
+             let dy = -(y2 - y1).abs();
+             let sx = if x1 < x2 { 1 } else { -1 };
+             let sy = if y1 < y2 { 1 } else { -1 };
+             let mut err = dx + dy;
+             let mut cx = x1;
+             let mut cy = y1;
+
+             loop {
+                 if cx >= 0 && cx < width && cy >= 0 && cy < height {
+                     buf[(cy * width + cx) as usize] = color;
+                 }
+                 if cx == x2 && cy == y2 { break; }
+                 let e2 = 2 * err;
+                 if e2 >= dy { err += dy; cx += sx; }
+                 if e2 <= dx { err += dx; cy += sy; }
+             }
+             Ok(Value::Null)
+        },
+        "draw_circle" => {
+             let cx = args.get(0).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let cy = args.get(1).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let r = args.get(2).and_then(|v| v.as_int().ok()).unwrap_or(0) as isize;
+             let color = args.get(3).and_then(|v| v.as_int().ok()).unwrap_or(0xFFFFFF) as u32;
+
+             let width = *WIDTH.lock().unwrap() as isize;
+             let height = *HEIGHT.lock().unwrap() as isize;
+             let mut buf = BUFFER.lock().unwrap();
+
+             for y in -r..=r {
+                 for x in -r..=r {
+                     if x*x + y*y <= r*r {
+                         let px = cx + x;
+                         let py = cy + y;
+                         if px >= 0 && px < width && py >= 0 && py < height {
+                             buf[(py * width + px) as usize] = color;
+                         }
+                     }
+                 }
+             }
              Ok(Value::Null)
         },
 

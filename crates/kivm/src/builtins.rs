@@ -659,29 +659,34 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kinetix_kicomp::ir::CompiledProgram;
+
+    fn dummy_vm() -> VM {
+        VM::new(CompiledProgram::new())
+    }
 
     #[test]
     fn test_typeof() {
-        let mut o = vec![];
-        let r = call_builtin("typeof", &[Value::Int(42)], &mut o).unwrap();
+        let mut vm = dummy_vm();
+        let r = call_builtin("typeof", &[Value::Int(42)], &mut vm).unwrap();
         assert!(matches!(r, Value::Str(s) if s == "int"));
     }
 
     #[test]
     fn test_len() {
-        let mut o = vec![];
-        assert!(matches!(call_builtin("len", &[Value::Str("hi".into())], &mut o).unwrap(), Value::Int(2)));
+        let mut vm = dummy_vm();
+        assert!(matches!(call_builtin("len", &[Value::Str("hi".into())], &mut vm).unwrap(), Value::Int(2)));
     }
 
     #[test]
     fn test_assert_pass() {
-        let mut o = vec![];
-        assert!(call_builtin("assert", &[Value::Bool(true)], &mut o).is_ok());
+        let mut vm = dummy_vm();
+        assert!(call_builtin("assert", &[Value::Bool(true)], &mut vm).is_ok());
     }
 
     #[test]
     fn test_assert_fail() {
-        let mut o = vec![];
-        assert!(call_builtin("assert", &[Value::Bool(false)], &mut o).is_err());
+        let mut vm = dummy_vm();
+        assert!(call_builtin("assert", &[Value::Bool(false)], &mut vm).is_err());
     }
 }

@@ -2,7 +2,7 @@
 
 **Kinetix** is an experimental compiled and interpreted programming language built in Rust, created by [MisterY3515](https://github.com/MisterY3515) as a student project (with AI assistance).
 
-Kinetix source files (`.kix`) can be **interpreted directly** via `kivm exec`, making it quick to prototype and test scripts without a separate compilation step. It can also be **compiled** to register-based bytecode (custom `.exki` or platform-specific `.exe`/`.app`/`.appimage` etc.) and runs on a custom virtual machine (**KiVM**). It supports Windows (Mainly tested), Linux, and macOS on **x86_64**, **ARM64**, and **Apple Silicon** architectures.
+Kinetix source files (`.kix`) can be **interpreted directly** via `kivm exec`, making it quick to prototype and test scripts without a separate compilation step. It can also be **compiled** to register-based bytecode (`.exki`, cross-platform) or **native machine code** (via LLVM) for maximum performance. It supports Windows (Mainly tested), Linux, and macOS on **x86_64**, **ARM64**, and **Apple Silicon** architectures.
 
 > ⚠️ **Development Status:** Kinetix is under active development. Some functions listed in the documentation or standard library may be **incomplete**, **not fully functional**, or **not yet implemented**. APIs and behavior may change between builds.
 
@@ -15,7 +15,7 @@ Kinetix is designed to make it easy to write **software tools and automation scr
 ### Hello World
 
 ```
-println("Hello, world!")
+print("Hello, world!")
 ```
 
 ### Variables
@@ -38,8 +38,8 @@ fn greet(who: string) -> string {
     return "Hello, " + who + "!"
 }
 
-println(add(3, 4))      // 7
-println(greet("World")) // Hello, World!
+print(add(3, 4))      // 7
+print(greet("World")) // Hello, World!
 ```
 
 ### If / Else
@@ -48,11 +48,11 @@ println(greet("World")) // Hello, World!
 let score = 85
 
 if score >= 90 {
-    println("A")
+    print("A")
 } else if score >= 80 {
-    println("B")
+    print("B")
 } else {
-    println("C")
+    print("C")
 }
 ```
 
@@ -61,7 +61,7 @@ if score >= 90 {
 ```
 mut x = 10
 while x > 0 {
-    println(x)
+    print(x)
     x = x - 1
 }
 ```
@@ -72,7 +72,7 @@ while x > 0 {
 let fruits = ["apple", "banana", "cherry"]
 
 for fruit in fruits {
-    println(fruit)
+    print(fruit)
 }
 ```
 
@@ -81,7 +81,7 @@ for fruit in fruits {
 ```
 // range(start, end) returns an array [start..end)
 for i in range(0, 10) {
-    println(i)
+    print(i)
 }
 ```
 
@@ -90,15 +90,15 @@ for i in range(0, 10) {
 ```
 let nums = [5, 3, 8, 1, 9, 2]
 
-println(len(nums))      // 6
-println(min(nums))      // 1
-println(max(nums))      // 9
+print(len(nums))      // 6
+print(min(nums))      // 1
+print(max(nums))      // 9
 
 let sorted = sort(nums)
-println(sorted)          // [1, 2, 3, 5, 8, 9]
+print(sorted)          // [1, 2, 3, 5, 8, 9]
 
 let reversed = reverse(nums)
-println(reversed)
+print(reversed)
 ```
 
 ### String Operations
@@ -106,12 +106,12 @@ println(reversed)
 ```
 let text = "Hello, Kinetix!"
 
-println(to_upper(text))              // HELLO, KINETIX!
-println(to_lower(text))              // hello, kinetix!
-println(contains(text, "Kinetix"))   // true
-println(split(text, ", "))           // ["Hello", "Kinetix!"]
-println(replace(text, "Hello", "Hi")) // Hi, Kinetix!
-println(trim("  spaces  "))         // spaces
+print(to_upper(text))              // HELLO, KINETIX!
+print(to_lower(text))              // hello, kinetix!
+print(contains(text, "Kinetix"))   // true
+print(split(text, ", "))           // ["Hello", "Kinetix!"]
+print(replace(text, "Hello", "Hi")) // Hi, Kinetix!
+print(trim("  spaces  "))         // spaces
 ```
 
 ### Lambda Functions
@@ -121,17 +121,17 @@ let double = fn(x: int) -> int {
     return x * 2
 }
 
-println(double(21))  // 42
+print(double(21))  // 42
 ```
 
 ### Math Module
 
 ```
-println(Math.sqrt(144.0))        // 12.0
-println(Math.abs(-5))            // 5
-println(Math.clamp(15, 0, 10))   // 10
-println(Math.lerp(0.0, 100.0, 0.5)) // 50.0
-println(Math.sin(Math.rad(90.0)))    // 1.0
+print(Math.sqrt(144.0))        // 12.0
+print(Math.abs(-5))            // 5
+print(Math.clamp(15, 0, 10))   // 10
+print(Math.lerp(0.0, 100.0, 0.5)) // 50.0
+print(Math.sin(Math.rad(90.0)))    // 1.0
 ```
 
 ### Multi-File Projects
@@ -147,7 +147,7 @@ fn square(n: int) -> int {
 // main.kix
 #include "math_utils.kix"
 
-println(square(7))  // 49
+print(square(7))  // 49
 ```
 
 ### Terminal Colors (Build 5)
@@ -156,7 +156,7 @@ println(square(7))  // 49
 term.clear()
 term.color_print("green", "SUCCESS: All tests passed!")
 term.color_print("red", "ERROR: Something went wrong")
-println(term.bold("important") + " and " + term.italic("elegant"))
+print(term.bold("important") + " and " + term.italic("elegant"))
 ```
 
 ### Interactive Shell
@@ -165,7 +165,7 @@ println(term.bold("important") + " and " + term.italic("elegant"))
 $ kivm shell
 Kinetix Shell v0.0.3 build 6
 
-~ ❯ println(2 + 2)
+~ ❯ print(2 + 2)
 4
 ~ ❯ ls
 ~ ❯ cd projects
@@ -194,7 +194,8 @@ Kinetix Shell v0.0.3 build 6
 | **Interpreter** | `kivm exec script.kix` | Run a `.kix` source file directly |
 | **Bytecode Runner** | `kivm run app.exki` | Run compiled bytecode |
 | **Compiler** | `kivm compile -i src.kix -o out.exki` | Compile to `.exki` bytecode |
-| **Bundler** | `kivm compile -i src.kix --exe` | Create a standalone executable |
+| **Bundler** | `kivm compile -i src.kix --exe` | Create a standalone executable (bytecode bundle) |
+| **Native (LLVM)** | `kivm compile -i src.kix --native` | Compile to native object file (`.o`) via LLVM 21 |
 | **Shell** | `kivm shell` | Interactive terminal with bash-like commands + Kinetix eval |
 | **Docs** | `kivm docs` | Open offline documentation in the browser |
 | **Tests** | `kivm test ./tests` | Run unit tests in a directory |
@@ -210,11 +211,42 @@ Kinetix Shell v0.0.3 build 6
 | `cli` | Command-line interface |
 | `installer` | Cross-platform installer |
 
-## Build
+## How to Self-Compile Kinetix
+
+If you want to build the compiler, the virtual machine, or the single-file installer from source, follow these steps:
+
+### Prerequisites
+1. **[Rust Toolchain](https://rustup.rs/)**: Install the latest stable version of Rust and Cargo.
+2. **LLVM 21 (Optional but Recommended)**: Required to build the native LLVM backend features (`kivm compile --native`).
+   - *Windows*: Download and install pre-built LLVM 21 binaries or compile LLVM from source. Ensure `LLVM_SYS_210_PREFIX` points to your LLVM installation directory.
+   - *Linux*: Install `llvm-21-dev` and `libpolly-21-dev` via your package manager.
+
+### Building Core Components
+
+To build the Kinetix CLI and Compiler (bytecode only, very fast):
+```bash
+cargo build --release --workspace
+```
+
+To build with the **Native LLVM Backend** enabled:
+```bash
+cargo build --release --features llvm
+```
+
+### Building the Kinetix Installer (All-In-One)
+
+The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. 
+**Windows Users**: You can use the provided PowerShell script which automates the entire process, including cleaning caches to avoid file-lock errors.
 
 ```bash
-cargo build --release
+# On Windows, simply run:
+powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
 ```
+
+If you prefer to build it manually:
+1. First, compile the release binaries: `cargo build --release -p kinetix-cli -p kinetix-kicomp`
+2. Then, build the installer: `cd crates/installer && cargo build --release`
+3. The final `installer.exe` will be located in the `crates/installer/target/release/` folder.
 
 ## Benchmarks (v0.0.3 Build 6)
 
