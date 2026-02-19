@@ -160,68 +160,124 @@ impl InstallerApp {
         }
     }
 
+    fn log(&mut self, msg: impl Into<String>) {
+        let s = msg.into();
+        println!("{}", s); // Only print to stdout
+    }
+
     fn install(&mut self) {
         let total = STEP_NAMES.len();
         let mut current_step = 0;
 
         macro_rules! step {
-            ($body:expr) => {
+            ($name:expr, $body:expr) => {
+                let name = $name;
+                self.log(format!("Starting step: {}", name));
                 self.state = InstallState::Installing { step: current_step, total };
                 current_step += 1;
-                if let Err(e) = (|| -> std::io::Result<()> { $body; Ok(()) })() {
-                    self.state = InstallState::Failed(format!("{}: {}", STEP_NAMES[current_step - 1], e));
-                    return;
+                match (|| -> std::io::Result<()> { $body; Ok(()) })() {
+                    Ok(_) => {
+                        self.log(format!("✓ Step complete: {}", name));
+                    }
+                    Err(e) => {
+                        let err_msg = format!("Failed: {}", e);
+                        self.log(&err_msg);
+                        self.state = InstallState::Failed(format!("{}: {}", name, e));
+                        return;
+                    }
                 }
             };
         }
 
         // Step 0: Create directories
-        step!({
+        step!("Create directories", {
             fs::create_dir_all(&self.install_path)?;
             fs::create_dir_all(self.install_path.join("bin"))?;
-            fs::create_dir_all(self.install_path.join("assets"))
+            fs::create_dir_all(self.install_path.join("assets"))?;
+            // Clean up old root-level binaries from previous installations
+            let old_cli = self.install_path.join(cli_filename());
+            let old_comp = self.install_path.join(kicomp_filename());
+            if old_cli.exists() {
+                self.log(format!("Removing old root-level {:?}", old_cli));
+                let _ = fs::remove_file(&old_cli);
+            }
+            if old_comp.exists() {
+                self.log(format!("Removing old root-level {:?}", old_comp));
+                let _ = fs::remove_file(&old_comp);
+            }
+        });
+
+        // Diagnostic: Check for existing installations
+        step!("Check Conflicts", {
+            self.log("Scanning PATH for existing kivm installations...");
+            if let Some(path_var) = std::env::var_os("PATH") {
+                let target_bin = self.install_path.join("bin").join(cli_filename());
+                for path in std::env::split_paths(&path_var) {
+                    let exe = path.join(cli_filename());
+                    if exe.exists() {
+                        if exe != target_bin {
+                            self.log(format!("⚠️ Found existing kivm at: {:?}", exe));
+                            self.log("   (This might be taking precedence over the new install)");
+                        } else {
+                            self.log(format!("Found previous install at target: {:?}", exe));
+                        }
+                    }
+                }
+            } else {
+                self.log("Warning: Could not read PATH environment variable.");
+            }
         });
 
         let bin_dir = self.install_path.join("bin");
 
         // Step 1: Install KiVM
-        step!({
+        step!("Install KiVM", {
             if self.install_kivm {
                 let cli_path = bin_dir.join(cli_filename());
+                self.log(format!("Writing kivm to {:?}", cli_path));
                 fs::write(&cli_path, CLI_BYTES)?;
                 #[cfg(unix)]
                 set_executable(&cli_path)?;
+            } else {
+                self.log("Skipping KiVM installation");
             }
         });
 
         // Step 2: Install KiComp
-        step!({
+        step!("Install KiComp", {
             if self.install_kicomp {
                 let comp_path = bin_dir.join(kicomp_filename());
+                self.log(format!("Writing kicomp to {:?}", comp_path));
                 fs::write(&comp_path, KICOMP_BYTES)?;
                 #[cfg(unix)]
                 set_executable(&comp_path)?;
+            } else {
+                self.log("Skipping KiComp installation");
             }
         });
 
         // Step 3: Install icon
-        step!({
+        step!("Install Icon", {
             let icon_path = self.install_path.join("assets").join("KiFile.png");
+            self.log(format!("Writing icon to {:?}", icon_path));
             fs::write(&icon_path, ICON_BYTES)
         });
 
         // Step 4: Configure PATH
-        step!({
+        step!("Configure PATH", {
             if self.add_to_path {
+                self.log("Adding to PATH...");
                 #[cfg(target_os = "windows")]
                 add_to_user_path_win(&bin_dir)?;
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
                 add_to_path_unix(&bin_dir)?;
+            } else {
+                self.log("Skipping PATH configuration");
             }
         });
 
         // Step 5: File associations
-        step!({
+        step!("File Associations", {
             #[cfg(target_os = "windows")]
             {
                 let icon_path = self.install_path.join("assets").join("KiFile.png");
@@ -232,6 +288,7 @@ impl InstallerApp {
                 let comp_exe = comp_path.to_str().unwrap();
 
                 if self.install_kivm {
+                    self.log("Registering .exki, .kix, .ki associations...");
                     register_progid(".exki", "Kinetix.Bundle")?;
                     register_shell("Kinetix.Bundle", "Kinetix Bundle", exe, "run", &icon_str)?;
                     register_progid(".kix", "Kinetix.Source")?;
@@ -239,6 +296,7 @@ impl InstallerApp {
                     register_shell("Kinetix.Source", "Kinetix Source File", exe, "exec", &icon_str)?;
                 }
                 if self.install_kicomp {
+                    self.log("Registering .kicomp association...");
                     register_progid(".kicomp", "Kinetix.Build")?;
                     register_shell("Kinetix.Build", "Kinetix Build Script", comp_exe, "", &icon_str)?;
                 }
@@ -248,38 +306,46 @@ impl InstallerApp {
         });
 
         // Step 6: Install documentation
-        step!({
+        step!("Install Documentation", {
             if self.install_docs {
                 // Copy docs from the embedded Documentation/ folder
-                // The build script should have placed docs alongside the installer
-                // We look for a docs/ folder next to the installer executable
                 let exe_dir = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|p| p.to_path_buf()));
                 
                 let docs_dest = self.install_path.join("docs");
+                self.log(format!("Copying docs to {:?}", docs_dest));
                 fs::create_dir_all(&docs_dest)?;
 
                 // Try to find docs next to the installer
                 if let Some(exe_parent) = &exe_dir {
                     let docs_src = exe_parent.join("docs");
                     if docs_src.exists() {
+                        self.log(format!("Found docs at {:?}", docs_src));
                         copy_dir_recursive(&docs_src, &docs_dest)?;
-                    }
-                    // Also try parent/Documentation
-                    let docs_src2 = exe_parent.parent()
-                        .map(|p| p.join("Documentation"));
-                    if let Some(ref src2) = docs_src2 {
-                        if src2.exists() {
-                            copy_dir_recursive(src2, &docs_dest)?;
+                    } else {
+                        // Also try parent/Documentation
+                        let docs_src2 = exe_parent.parent()
+                            .map(|p| p.join("Documentation"));
+                        if let Some(ref src2) = docs_src2 {
+                            if src2.exists() {
+                                self.log(format!("Found docs at {:?}", src2));
+                                copy_dir_recursive(src2, &docs_dest)?;
+                            } else {
+                                self.log("Warning: Documentation folder not found.");
+                            }
+                        } else {
+                             self.log("Warning: Could not determine Documentation path.");
                         }
                     }
                 }
+            } else {
+                self.log("Skipping documentation");
             }
         });
 
         // Step 7: Finalize
-        step!({});
+        step!("Finalizing", { self.log("Cleanup..."); });
 
         self.state = InstallState::Done;
     }
@@ -302,8 +368,9 @@ impl eframe::App for InstallerApp {
                     ui.add_space(2.0);
                     ui.label(
                         egui::RichText::new(format!(
-                            "v{}  •  {} ({})",
+                            "v{} ({})  •  {} ({})",
                             env!("CARGO_PKG_VERSION"),
+                            option_env!("KINETIX_BUILD").unwrap_or("Dev"),
                             std::env::consts::OS,
                             std::env::consts::ARCH
                         ))
@@ -338,7 +405,7 @@ impl eframe::App for InstallerApp {
 
                 // ── Footer ──
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.add_space(4.0);
+                    ui.add_space(8.0);
                     ui.label(
                         egui::RichText::new("© 2026 MisterY3515")
                             .size(11.0)
@@ -622,6 +689,20 @@ fn add_to_user_path_win(path: &Path) -> std::io::Result<()> {
     let current_path: String = env.get_value("Path")?;
     let path_str = path.to_str()
         .ok_or(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid path"))?;
+
+    // Remove stale old root-level PATH entries (e.g. .kinetix without /bin)
+    let install_root = path.parent().unwrap_or(path);
+    let root_str = install_root.to_str().unwrap_or("");
+    let mut current_path = current_path;
+    if !root_str.is_empty() && root_str != path_str && current_path.contains(root_str) {
+        let entries: Vec<&str> = current_path.split(';').collect();
+        let cleaned: Vec<&str> = entries.into_iter()
+            .filter(|e| *e != root_str)
+            .collect();
+        current_path = cleaned.join(";");
+        env.set_value("Path", &current_path)?;
+    }
+
     if !current_path.contains(path_str) {
         let sep = if current_path.ends_with(';') { "" } else { ";" };
         env.set_value("Path", &format!("{}{}{}", current_path, sep, path_str))?;

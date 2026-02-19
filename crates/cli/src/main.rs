@@ -232,7 +232,8 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Version => {
-            println!("Kinetix CLI v{} build 6", env!("CARGO_PKG_VERSION"));
+            let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
+            println!("Kinetix CLI v{} ({})", env!("CARGO_PKG_VERSION"), build);
         }
         Commands::Shell => {
             run_shell();
@@ -359,7 +360,8 @@ fn preprocess_includes(source: &str, base_path: &Path) -> Result<String, String>
 fn run_shell() {
     use kinetix_kicomp::compiler::Compiler;
 
-    println!("\x1b[1;35mKinetix Shell\x1b[0m v{} build 6", env!("CARGO_PKG_VERSION"));
+    let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
+    println!("\x1b[1;35mKinetix Shell\x1b[0m v{} ({})", env!("CARGO_PKG_VERSION"), build);
     println!("Type \x1b[36mexit\x1b[0m to quit, \x1b[36mhelp\x1b[0m for commands.\n");
 
     let mut line_buf = String::new();

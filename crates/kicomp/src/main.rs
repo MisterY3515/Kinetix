@@ -21,10 +21,20 @@ struct Cli {
     /// Output .exki file (default: same name as input with .exki extension)
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Show version information
+    #[arg(long)]
+    version: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.version {
+        let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
+        println!("Kinetix Compiler v{} ({})", env!("CARGO_PKG_VERSION"), build);
+        return;
+    }
 
     let source = match fs::read_to_string(&cli.input) {
         Ok(s) => s,
