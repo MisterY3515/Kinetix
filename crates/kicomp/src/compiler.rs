@@ -42,6 +42,8 @@ pub struct Compiler {
     scopes: Vec<Scope>,
     next_temp: u16,
     max_temp: u16,
+    /// Current source line number being compiled (for line_map).
+    pub current_line: u32,
 }
 
 impl Compiler {
@@ -51,6 +53,7 @@ impl Compiler {
             scopes: vec![Scope::new(0)],
             next_temp: 0,
             max_temp: 0,
+            current_line: 1,
         }
     }
 
@@ -63,12 +66,22 @@ impl Compiler {
             }
         }
         self.program.main.locals = self.max_temp;
-        self.current_fn().emit(Instruction::a_only(Opcode::Halt, 0));
+        self.emit_instr(Instruction::a_only(Opcode::Halt, 0));
         Ok(&self.program)
     }
 
     fn current_fn(&mut self) -> &mut CompiledFunction {
         &mut self.program.main
+    }
+
+    /// Emit an instruction and record the current source line in line_map.
+    fn emit_instr(&mut self, instr: Instruction) -> usize {
+        let line = self.current_line;
+        let func = &mut self.program.main;
+        let idx = func.instructions.len();
+        func.instructions.push(instr);
+        func.line_map.push(line);
+        idx
     }
 
     #[allow(dead_code)]
@@ -115,13 +128,25 @@ impl Compiler {
     // ========== Statements ==========
 
     fn compile_statement(&mut self, stmt: &Statement<'_>) -> Result<(), String> {
+        // Update current_line from the AST node
         match stmt {
-            Statement::Let { name, value, mutable: _, type_hint: _ } => {
+            Statement::Let { line, .. } | Statement::Return { line, .. }
+            | Statement::Expression { line, .. } | Statement::Block { line, .. }
+            | Statement::Function { line, .. } | Statement::While { line, .. }
+            | Statement::For { line, .. } | Statement::Include { line, .. }
+            | Statement::Class { line, .. } | Statement::Struct { line, .. }
+            | Statement::Break { line } | Statement::Continue { line }
+            | Statement::Version { line, .. } => {
+                self.current_line = *line as u32;
+            }
+        }
+        match stmt {
+            Statement::Let { name, value, mutable: _, type_hint: _, .. } => {
                 let reg = self.compile_expression(value)?;
                 if self.scopes.len() == 1 {
                     // Global scope -> SetGlobal
                     let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
-                    self.current_fn().emit(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
+                    self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
                 } else {
                     // Local scope
                     let slot = self.current_scope_mut().define(name);
@@ -129,25 +154,25 @@ impl Compiler {
                         self.max_temp = self.current_scope_mut().next_register; 
                     }
                     if slot != reg {
-                        self.current_fn().emit(Instruction::ab(Opcode::SetLocal, slot, reg));
+                        self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, reg));
                     }
                 }
             }
-            Statement::Function { name, parameters, body, return_type: _ } => {
+            Statement::Function { name, parameters, body, return_type: _, .. } => {
                 self.compile_function(name, parameters, body)?;
             }
-            Statement::Return { value } => {
+            Statement::Return { value, .. } => {
                 if let Some(val) = value {
                     let reg = self.compile_expression(val)?;
-                    self.current_fn().emit(Instruction::a_only(Opcode::Return, reg));
+                    self.emit_instr(Instruction::a_only(Opcode::Return, reg));
                 } else {
-                    self.current_fn().emit(Instruction::a_only(Opcode::ReturnVoid, 0));
+                    self.emit_instr(Instruction::a_only(Opcode::ReturnVoid, 0));
                 }
             }
-            Statement::Expression { expression } => {
+            Statement::Expression { expression, .. } => {
                 self.compile_expression(expression)?;
             }
-            Statement::Block { statements } => {
+            Statement::Block { statements, .. } => {
                 self.scopes.push(Scope::new(self.next_temp));
                 for s in statements {
                     self.compile_statement(s)?;
@@ -157,10 +182,10 @@ impl Compiler {
                 }
                 self.scopes.pop();
             }
-            Statement::While { condition, body } => {
+            Statement::While { condition, body, .. } => {
                 self.compile_while(condition, body)?;
             }
-            Statement::For { iterator, range, body } => {
+            Statement::For { iterator, range, body, .. } => {
                 self.compile_for(iterator, range, body)?;
             }
             Statement::Include { .. } => {
@@ -169,10 +194,10 @@ impl Compiler {
             Statement::Class { .. } | Statement::Struct { .. } => {
                 // Deferred to M4
             }
-            Statement::Break | Statement::Continue => {
+            Statement::Break { .. } | Statement::Continue { .. } => {
                 // Handled by loop context (M4)
             }
-            Statement::Version { build } => {
+            Statement::Version { build, .. } => {
                 if *build > CURRENT_BUILD {
                     eprintln!("Warning: Script requires build {}, but you are running build {}. Some features may not work.", build, CURRENT_BUILD);
                 }
@@ -206,7 +231,7 @@ impl Compiler {
         if self.next_temp > self.max_temp { self.max_temp = self.next_temp; }
 
         // Compile body
-        if let Statement::Block { statements } = body {
+        if let Statement::Block { statements, .. } = body {
             for s in statements {
                 self.compile_statement(s)?;
                 if let Some(scope) = self.scopes.last() {
@@ -216,7 +241,7 @@ impl Compiler {
         }
 
         // Implicit return void
-        self.current_fn().emit(Instruction::a_only(Opcode::ReturnVoid, 0));
+        self.emit_instr(Instruction::a_only(Opcode::ReturnVoid, 0));
         self.scopes.pop();
 
         // Restore state
@@ -233,8 +258,8 @@ impl Compiler {
         let name_const = self.current_fn().add_constant(Constant::String(name.to_string()));
         let reg = self.alloc_register();
         let idx_const = self.current_fn().add_constant(Constant::Function(func_idx));
-        self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx_const));
-        self.current_fn().emit(Instruction::ab(Opcode::SetGlobal, name_const, reg));
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx_const));
+        self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_const, reg));
         self.current_scope_mut().define(name);
         if self.current_scope_mut().next_register > self.max_temp {
              self.max_temp = self.current_scope_mut().next_register; 
@@ -246,9 +271,9 @@ impl Compiler {
     fn compile_while(&mut self, condition: &Expression<'_>, body: &Statement<'_>) -> Result<(), String> {
         let loop_start = self.current_fn().instructions.len();
         let cond_reg = self.compile_expression(condition)?;
-        let jump_idx = self.current_fn().emit(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
+        let jump_idx = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
 
-        if let Statement::Block { statements } = body {
+        if let Statement::Block { statements, .. } = body {
             for s in statements {
                 self.compile_statement(s)?;
                 if let Some(scope) = self.scopes.last() {
@@ -257,7 +282,7 @@ impl Compiler {
             }
         }
 
-        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u16));
+        self.emit_instr(Instruction::a_only(Opcode::Jump, loop_start as u16));
         let exit_pos = self.current_fn().instructions.len();
         self.current_fn().instructions[jump_idx].a = exit_pos as u16;
 
@@ -271,13 +296,13 @@ impl Compiler {
         if self.current_scope_mut().next_register > self.max_temp { self.max_temp = self.current_scope_mut().next_register; }
 
         let zero_const = self.current_fn().add_constant(Constant::Integer(0));
-        self.current_fn().emit(Instruction::ab(Opcode::LoadConst, idx_reg, zero_const));
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, idx_reg, zero_const));
 
         let loop_start = self.current_fn().instructions.len();
-        self.current_fn().emit(Instruction::new(Opcode::GetIndex, var_reg, iter_reg, idx_reg));
-        let jump_idx = self.current_fn().emit(Instruction::ab(Opcode::JumpIfFalse, 0, var_reg));
+        self.emit_instr(Instruction::new(Opcode::GetIndex, var_reg, iter_reg, idx_reg));
+        let jump_idx = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, var_reg));
 
-        if let Statement::Block { statements } = body {
+        if let Statement::Block { statements, .. } = body {
             for s in statements {
                 self.compile_statement(s)?;
             }
@@ -285,9 +310,9 @@ impl Compiler {
 
         let one_const = self.current_fn().add_constant(Constant::Integer(1));
         let one_reg = self.alloc_register();
-        self.current_fn().emit(Instruction::ab(Opcode::LoadConst, one_reg, one_const));
-        self.current_fn().emit(Instruction::new(Opcode::Add, idx_reg, idx_reg, one_reg));
-        self.current_fn().emit(Instruction::a_only(Opcode::Jump, loop_start as u16));
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, one_reg, one_const));
+        self.emit_instr(Instruction::new(Opcode::Add, idx_reg, idx_reg, one_reg));
+        self.emit_instr(Instruction::a_only(Opcode::Jump, loop_start as u16));
 
         let exit_pos = self.current_fn().instructions.len();
         self.current_fn().instructions[jump_idx].a = exit_pos as u16;
@@ -302,30 +327,30 @@ impl Compiler {
             Expression::Integer(val) => {
                 let reg = self.alloc_register();
                 let idx = self.current_fn().add_constant(Constant::Integer(*val));
-                self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
             Expression::Float(val) => {
                 let reg = self.alloc_register();
                 let idx = self.current_fn().add_constant(Constant::Float(*val));
-                self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
             Expression::String(val) => {
                 let reg = self.alloc_register();
                 let idx = self.current_fn().add_constant(Constant::String(val.clone()));
-                self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
             Expression::Boolean(val) => {
                 let reg = self.alloc_register();
                 let opcode = if *val { Opcode::LoadTrue } else { Opcode::LoadFalse };
-                self.current_fn().emit(Instruction::a_only(opcode, reg));
+                self.emit_instr(Instruction::a_only(opcode, reg));
                 Ok(reg)
             }
             Expression::Null => {
                 let reg = self.alloc_register();
-                self.current_fn().emit(Instruction::a_only(Opcode::LoadNull, reg));
+                self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
                 Ok(reg)
             }
             Expression::Identifier(name) => {
@@ -335,7 +360,7 @@ impl Compiler {
                 // Global lookup (Globals are strict-const or unsafe-shared, we allow access)
                 let reg = self.alloc_register();
                 let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
-                self.current_fn().emit(Instruction::ab(Opcode::GetGlobal, reg, name_idx));
+                self.emit_instr(Instruction::ab(Opcode::GetGlobal, reg, name_idx));
                 Ok(reg)
             }
             Expression::Prefix { operator, right } => {
@@ -346,7 +371,7 @@ impl Compiler {
                     "!" => Opcode::Not,
                     _ => return Err(format!("Unknown prefix operator: {}", operator)),
                 };
-                self.current_fn().emit(Instruction::ab(opcode, result, right_reg));
+                self.emit_instr(Instruction::ab(opcode, result, right_reg));
                 Ok(result)
             }
             Expression::Infix { left, operator, right } => {
@@ -369,7 +394,7 @@ impl Compiler {
                     "||" => Opcode::Or,
                     _ => return Err(format!("Unknown infix operator: {}", operator)),
                 };
-                self.current_fn().emit(Instruction::new(opcode, result, left_reg, right_reg));
+                self.emit_instr(Instruction::new(opcode, result, left_reg, right_reg));
                 Ok(result)
             }
             Expression::Assign { target, value } => {
@@ -377,21 +402,21 @@ impl Compiler {
                 match target {
                     Expression::Identifier(name) => {
                         if let Some(slot) = self.resolve_assign(name) {
-                            self.current_fn().emit(Instruction::ab(Opcode::SetLocal, slot, val_reg));
+                            self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, val_reg));
                         } else {
                             let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
-                            self.current_fn().emit(Instruction::ab(Opcode::SetGlobal, name_idx, val_reg));
+                            self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, val_reg));
                         }
                     }
                     Expression::MemberAccess { object, member } => {
                         let obj_reg = self.compile_expression(object)?; // Object moved if local!
                         let name_idx = self.current_fn().add_constant(Constant::String(member.clone()));
-                        self.current_fn().emit(Instruction::new(Opcode::SetMember, obj_reg, name_idx, val_reg));
+                        self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, name_idx, val_reg));
                     }
                     Expression::Index { left, index } => {
                         let left_reg = self.compile_expression(left)?; // Array/Map moved if local!
                         let idx_reg = self.compile_expression(index)?;
-                        self.current_fn().emit(Instruction::new(Opcode::SetIndex, left_reg, idx_reg, val_reg));
+                        self.emit_instr(Instruction::new(Opcode::SetIndex, left_reg, idx_reg, val_reg));
                     }
                     _ => return Err("Invalid assignment target".to_string()),
                 }
@@ -402,20 +427,25 @@ impl Compiler {
                 if let Expression::Identifier(name) = *function {
                     if name == "print" && arguments.len() == 1 {
                         let arg_reg = self.compile_expression(&arguments[0])?;
-                        self.current_fn().emit(Instruction::a_only(Opcode::Print, arg_reg));
+                        self.emit_instr(Instruction::a_only(Opcode::Print, arg_reg));
                         let null_reg = self.alloc_register();
-                        self.current_fn().emit(Instruction::a_only(Opcode::LoadNull, null_reg));
+                        self.emit_instr(Instruction::a_only(Opcode::LoadNull, null_reg));
                         return Ok(null_reg);
                     }
                 }
 
-                // Module builtin: module.function(args) → flatten to "module.function" builtin call
+                // Module builtin: module.function(args) → flatten to "Module.function" builtin call
                 if let Expression::MemberAccess { object, member } = *function {
                     if let Expression::Identifier(module_name) = *object {
-                        let flat_name = format!("{}.{}", module_name, member);
+                        let mut chars = module_name.chars();
+                        let cap_module = match chars.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                        };
+                        let flat_name = format!("{}.{}", cap_module, member);
                         let call_reg = self.alloc_register();
                         let name_idx = self.current_fn().add_constant(Constant::String(flat_name));
-                        self.current_fn().emit(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
+                        self.emit_instr(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
                         for (i, arg) in arguments.iter().enumerate() {
                             let expected_reg = call_reg + 1 + i as u16;
                             let arg_reg = self.compile_expression(arg)?;
@@ -423,17 +453,17 @@ impl Compiler {
                                 while self.next_temp <= expected_reg {
                                     self.alloc_register();
                                 }
-                                self.current_fn().emit(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                                self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
                             }
                         }
-                        self.current_fn().emit(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+                        self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
                         return Ok(call_reg);
                     }
                 }
 
                 let orig_func_reg = self.compile_expression(function)?;
                 let call_reg = self.alloc_register();
-                self.current_fn().emit(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));
+                self.emit_instr(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));
                 for (i, arg) in arguments.iter().enumerate() {
                     let expected_reg = call_reg + 1 + i as u16;
                     let arg_reg = self.compile_expression(arg)?;
@@ -441,29 +471,29 @@ impl Compiler {
                         while self.next_temp <= expected_reg {
                             self.alloc_register();
                         }
-                        self.current_fn().emit(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                        self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
                     }
                 }
-                self.current_fn().emit(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+                self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
                 Ok(call_reg)
             }
             Expression::If { condition, consequence, alternative } => {
                 let cond_reg = self.compile_expression(condition)?;
                 let result_reg = self.alloc_register();
-                let jump_else = self.current_fn().emit(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
+                let jump_else = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
 
-                if let Statement::Block { statements } = *consequence {
+                if let Statement::Block { statements, .. } = *consequence {
                     for s in statements {
                         self.compile_statement(s)?;
                     }
                 }
 
                 if let Some(alt) = alternative {
-                    let jump_end = self.current_fn().emit(Instruction::a_only(Opcode::Jump, 0));
+                    let jump_end = self.emit_instr(Instruction::a_only(Opcode::Jump, 0));
                     let else_pos = self.current_fn().instructions.len();
                     self.current_fn().instructions[jump_else].a = else_pos as u16;
 
-                    if let Statement::Block { statements } = *alt {
+                    if let Statement::Block { statements, .. } = *alt {
                         for s in statements {
                             self.compile_statement(s)?;
                         }
@@ -482,14 +512,14 @@ impl Compiler {
                 let left_reg = self.compile_expression(left)?;
                 let idx_reg = self.compile_expression(index)?;
                 let result = self.alloc_register();
-                self.current_fn().emit(Instruction::new(Opcode::GetIndex, result, left_reg, idx_reg));
+                self.emit_instr(Instruction::new(Opcode::GetIndex, result, left_reg, idx_reg));
                 Ok(result)
             }
             Expression::MemberAccess { object, member } => {
                 let obj_reg = self.compile_expression(object)?;
                 let name_idx = self.current_fn().add_constant(Constant::String(member.clone()));
                 let result = self.alloc_register();
-                self.current_fn().emit(Instruction::new(Opcode::GetMember, result, obj_reg, name_idx));
+                self.emit_instr(Instruction::new(Opcode::GetMember, result, obj_reg, name_idx));
                 Ok(result)
             }
             Expression::ArrayLiteral(elements) => {
@@ -497,7 +527,7 @@ impl Compiler {
                 for elem in elements {
                     self.compile_expression(elem)?;
                 }
-                self.current_fn().emit(Instruction::ab(Opcode::MakeArray, start_reg, elements.len() as u16));
+                self.emit_instr(Instruction::ab(Opcode::MakeArray, start_reg, elements.len() as u16));
                 Ok(start_reg)
             }
             Expression::FunctionLiteral { parameters, body, return_type: _ } => {
@@ -506,12 +536,12 @@ impl Compiler {
                 let reg = self.alloc_register();
                 let func_idx = self.program.functions.len() - 1;
                 let idx = self.current_fn().add_constant(Constant::Function(func_idx));
-                self.current_fn().emit(Instruction::ab(Opcode::LoadConst, reg, idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
             Expression::Range { .. } | Expression::MapLiteral(_) | Expression::Match { .. } => {
                 let reg = self.alloc_register();
-                self.current_fn().emit(Instruction::a_only(Opcode::LoadNull, reg));
+                self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
                 Ok(reg)
             }
         }

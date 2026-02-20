@@ -162,6 +162,8 @@ pub struct CompiledFunction {
     pub instructions: Vec<Instruction>,
     pub constants: Vec<Constant>,
     pub param_names: Vec<String>,
+    /// Maps each instruction index to a source line number (1-based).
+    pub line_map: Vec<u32>,
 }
 
 impl CompiledFunction {
@@ -173,6 +175,7 @@ impl CompiledFunction {
             instructions: vec![],
             constants: vec![],
             param_names: vec![],
+            line_map: vec![],
         }
     }
 

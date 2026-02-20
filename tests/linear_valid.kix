@@ -1,8 +1,8 @@
 let x = 10;
 let y = x;
 // x is now moved
-// print(x); // This would error
+// println(x); // This would error
 
 x = 20; // Revitalized
-print(x);
-print(y);
+println(x);
+println(y);

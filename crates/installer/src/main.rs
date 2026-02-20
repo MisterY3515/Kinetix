@@ -98,11 +98,25 @@ fn main() -> eframe::Result<()> {
         let _ = std::fs::write("crash_log.txt", format!("Panic at {}: {}\n", location, msg));
     }));
 
+    let icon = match image::load_from_memory(ICON_BYTES) {
+        Ok(image) => {
+            let image = image.into_rgba8();
+            let (width, height) = image.dimensions();
+            Some(egui::IconData {
+                rgba: image.into_raw(),
+                width,
+                height,
+            })
+        }
+        Err(_) => None,
+    };
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([520.0, 580.0])
             .with_min_inner_size([520.0, 580.0])
-            .with_decorations(true),
+            .with_decorations(true)
+            .with_icon(icon.unwrap_or_default()),
         ..Default::default()
     };
 
@@ -125,6 +139,7 @@ const STEP_NAMES: &[&str] = &[
     "Installing icon",
     "Configuring PATH",
     "Setting file associations",
+    "Installing terminal profile",
     "Installing documentation",
     "Finalizing",
 ];
@@ -133,10 +148,14 @@ const STEP_NAMES: &[&str] = &[
 
 #[derive(PartialEq)]
 enum InstallState {
-    Ready,
+    Welcome,
+    License,
+    Config,
     Installing { step: usize, total: usize },
     Done,
     Failed(String),
+    Repair,
+    Uninstall,
 }
 
 struct InstallerApp {
@@ -146,17 +165,29 @@ struct InstallerApp {
     install_docs: bool,
     add_to_path: bool,
     state: InstallState,
+    agreed_license: bool,
+    launch_shell_after: bool,
 }
 
 impl InstallerApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        let mut initial_state = InstallState::Welcome;
+        if args.iter().any(|arg| arg == "--uninstall") {
+            initial_state = InstallState::Uninstall;
+        } else if args.iter().any(|arg| arg == "--repair") {
+            initial_state = InstallState::Repair;
+        }
+
         Self {
             install_path: default_install_path(),
             install_kivm: true,
             install_kicomp: true,
             install_docs: true,
             add_to_path: true,
-            state: InstallState::Ready,
+            state: initial_state,
+            agreed_license: false,
+            launch_shell_after: true,
         }
     }
 
@@ -305,7 +336,46 @@ impl InstallerApp {
             create_desktop_entry(&self.install_path)?;
         });
 
-        // Step 6: Install documentation
+        // Step 6: Terminal Profile
+        step!("Install Terminal Profile", {
+            self.log("Setting up Windows Terminal profile...");
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+                    let mut frag_dir = PathBuf::from(local_app_data);
+                    frag_dir.push("Microsoft");
+                    frag_dir.push("Windows Terminal");
+                    frag_dir.push("Fragments");
+                    frag_dir.push("Kinetix");
+                    
+                    if std::fs::create_dir_all(&frag_dir).is_ok() {
+                        let json_path = frag_dir.join("kinetix.json");
+                        let icon_path = self.install_path.join("assets").join("KiFile.png");
+                        let exe_path = bin_dir.join(cli_filename());
+                        
+                        let json = format!(r#"{{
+  "profiles": [
+    {{
+      "name": "Kinetix Shell",
+      "commandline": "\"{}\" shell",
+      "startingDirectory": "%USERPROFILE%",
+      "icon": "{}"
+    }}
+  ]
+}}"#, 
+                            exe_path.display().to_string().replace('\\', "\\\\"), 
+                            icon_path.display().to_string().replace('\\', "\\\\")
+                        );
+                        let _ = std::fs::write(&json_path, json);
+                        self.log("Terminal profile fragment created.");
+                    } else {
+                        self.log("Warning: Could not create Terminal Fragment directory.");
+                    }
+                }
+            }
+        });
+
+        // Step 7: Install documentation
         step!("Install Documentation", {
             if self.install_docs {
                 // Copy docs from the embedded Documentation/ folder
@@ -344,8 +414,33 @@ impl InstallerApp {
             }
         });
 
-        // Step 7: Finalize
-        step!("Finalizing", { self.log("Cleanup..."); });
+        // Step 8: Finalize
+        step!("Finalizing", { 
+            self.log("Cleanup and Registry modifications..."); 
+            
+            // 1. Copy installer itself into the bin directory so it can be invoked for uninstalls without the original setup.exe
+            if let Ok(current_exe) = std::env::current_exe() {
+                let bin_dir = self.install_path.join("bin");
+                let _ = fs::copy(&current_exe, bin_dir.join("installer.exe"));
+            }
+
+            // 2. Add Windows Add/Remove programs entry
+            #[cfg(target_os = "windows")]
+            {
+                let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+                if let Ok((key, _)) = hkcu.create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Kinetix") {
+                    let _ = key.set_value("DisplayName", &"Kinetix Universal Runtime");
+                    let _ = key.set_value("DisplayVersion", &env!("CARGO_PKG_VERSION"));
+                    let _ = key.set_value("Publisher", &"MisterY3515");
+                    let icon_path = self.install_path.join("assets").join("KiFile.png");
+                    let _ = key.set_value("DisplayIcon", &icon_path.to_string_lossy().to_string());
+                    
+                    let uninstaller = self.install_path.join("bin").join("installer.exe");
+                    let _ = key.set_value("UninstallString", &format!("\"{}\" --uninstall", uninstaller.display()));
+                    let _ = key.set_value("ModifyPath", &format!("\"{}\" --repair", uninstaller.display()));
+                }
+            }
+        });
 
         self.state = InstallState::Done;
     }
@@ -390,7 +485,9 @@ impl eframe::App for InstallerApp {
                 });
 
                 match &self.state {
-                    InstallState::Ready => self.draw_config(ui),
+                    InstallState::Welcome => self.draw_welcome(ui),
+                    InstallState::License => self.draw_license(ui),
+                    InstallState::Config => self.draw_config(ui),
                     InstallState::Installing { step, total } => {
                         let step = *step;
                         let total = *total;
@@ -401,6 +498,8 @@ impl eframe::App for InstallerApp {
                         let msg = msg.clone();
                         self.draw_failed(ui, &msg);
                     }
+                    InstallState::Repair => self.draw_repair(ui),
+                    InstallState::Uninstall => self.draw_uninstall(ui),
                 }
 
                 // ── Footer ──
@@ -417,6 +516,99 @@ impl eframe::App for InstallerApp {
 }
 
 impl InstallerApp {
+    fn draw_welcome(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(60.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("Welcome to Kinetix")
+                    .size(24.0)
+                    .strong()
+                    .color(TEXT_PRIMARY)
+            );
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("The Kinetix Universal Hybrid Runtime & Compiler setup wizard.")
+                    .size(14.0)
+                    .color(TEXT_SECONDARY)
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("This will install the language tools and integration components on your system.")
+                    .size(14.0)
+                    .color(TEXT_DIM)
+            );
+            
+            ui.add_space(48.0);
+            let next_btn = egui::Button::new(
+                egui::RichText::new("    NEXT >    ")
+                    .size(16.0)
+                    .strong()
+                    .color(egui::Color32::WHITE)
+            )
+            .fill(ACCENT)
+            .rounding(8.0)
+            .min_size(egui::vec2(160.0, 40.0));
+
+            if ui.add(next_btn).clicked() {
+                self.state = InstallState::License;
+            }
+        });
+    }
+
+    fn draw_license(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("End User License Agreement").size(16.0).strong().color(TEXT_PRIMARY));
+        ui.add_space(8.0);
+
+        let eula = include_str!("../../../LICENSE");
+
+        egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+            egui::Frame::none()
+                .fill(BG_CARD)
+                .rounding(6.0)
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(eula).size(12.0).color(TEXT_SECONDARY).monospace()));
+                });
+        });
+
+        ui.add_space(16.0);
+        
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.agreed_license, egui::RichText::new("I have read and accept the license terms.").size(14.0));
+        });
+
+        ui.add_space(24.0);
+        ui.horizontal(|ui| {
+            let back_btn = egui::Button::new(egui::RichText::new("  < BACK  ").size(14.0))
+                .fill(BG_CARD)
+                .rounding(8.0)
+                .min_size(egui::vec2(120.0, 36.0));
+            
+            if ui.add(back_btn).clicked() {
+                self.state = InstallState::Welcome;
+            }
+
+            ui.add_space(16.0);
+
+            let mut next_btn = egui::Button::new(
+                egui::RichText::new("  AGREE & CONTINUE >  ").size(14.0).strong().color(egui::Color32::WHITE)
+            )
+            .rounding(8.0)
+            .min_size(egui::vec2(200.0, 36.0));
+
+            if self.agreed_license {
+                next_btn = next_btn.fill(ACCENT);
+            } else {
+                next_btn = next_btn.fill(BG_CARD);
+            }
+
+            if ui.add_enabled(self.agreed_license, next_btn).clicked() {
+                self.state = InstallState::Config;
+            }
+        });
+    }
+
     fn draw_config(&mut self, ui: &mut egui::Ui) {
         // Components card
         ui.add_space(4.0);
@@ -473,20 +665,31 @@ impl InstallerApp {
                 });
             });
 
-        // Install button
-        ui.add_space(16.0);
-        ui.vertical_centered(|ui| {
-            let btn = egui::Button::new(
+        // Nav buttons
+        ui.add_space(24.0);
+        ui.horizontal(|ui| {
+            let back_btn = egui::Button::new(egui::RichText::new("  < BACK  ").size(14.0))
+                .fill(BG_CARD)
+                .rounding(8.0)
+                .min_size(egui::vec2(120.0, 36.0));
+            
+            if ui.add(back_btn).clicked() {
+                self.state = InstallState::License;
+            }
+
+            ui.add_space(16.0);
+
+            let install_btn = egui::Button::new(
                 egui::RichText::new("  INSTALL  ")
                     .size(16.0)
                     .strong()
                     .color(egui::Color32::WHITE)
             )
             .fill(ACCENT)
-            .rounding(10.0)
+            .rounding(8.0)
             .min_size(egui::vec2(200.0, 44.0));
 
-            if ui.add(btn).clicked() {
+            if ui.add(install_btn).clicked() {
                 self.install();
             }
         });
@@ -534,8 +737,8 @@ impl InstallerApp {
         });
     }
 
-    fn draw_done(&self, ui: &mut egui::Ui) {
-        ui.add_space(40.0);
+    fn draw_done(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(30.0);
         ui.vertical_centered(|ui| {
             ui.label(
                 egui::RichText::new("✓")
@@ -544,31 +747,68 @@ impl InstallerApp {
             );
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new("Installation complete!")
+                egui::RichText::new("Installation successful!")
                     .size(18.0)
                     .color(SUCCESS)
                     .strong()
             );
             ui.add_space(12.0);
             ui.label(
-                egui::RichText::new("Restart your terminal to use kivm.")
+                egui::RichText::new("Kinetix has been installed successfully to:")
                     .size(14.0)
                     .color(TEXT_SECONDARY)
             );
             ui.add_space(4.0);
             ui.label(
-                egui::RichText::new(format!("Installed to: {}", self.install_path.display()))
+                egui::RichText::new(self.install_path.display().to_string())
                     .size(12.0)
                     .color(TEXT_DIM)
                     .monospace()
             );
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("Try: kivm shell")
-                    .size(13.0)
-                    .color(ACCENT)
-                    .monospace()
-            );
+            
+            ui.add_space(20.0);
+            ui.checkbox(&mut self.launch_shell_after, egui::RichText::new("Launch Kinetix Shell now").size(14.0).color(TEXT_PRIMARY));
+            
+            ui.add_space(32.0);
+            let finish_btn = egui::Button::new(
+                egui::RichText::new("    FINISH    ")
+                    .size(16.0)
+                    .strong()
+                    .color(egui::Color32::WHITE)
+            )
+            .fill(SUCCESS.linear_multiply(0.8))
+            .rounding(8.0)
+            .min_size(egui::vec2(160.0, 40.0));
+
+            if ui.add(finish_btn).clicked() {
+                if self.launch_shell_after {
+                    #[cfg(target_os = "windows")]
+                    {
+                        // Launch via Windows Terminal using the custom profile we created
+                        let _ = std::process::Command::new("wt")
+                            .args(["-p", "Kinetix Shell"])
+                            .spawn()
+                            .or_else(|_| {
+                                // Fallback to classic cmd.exe if Windows Terminal is not installed
+                                let bin_dir = self.install_path.join("bin");
+                                let exe_path = bin_dir.join(cli_filename());
+                                std::process::Command::new("cmd")
+                                    .args(["/c", "start", "\"Kinetix Shell\"", exe_path.to_str().unwrap(), "shell"])
+                                    .spawn()
+                            });
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let bin_dir = self.install_path.join("bin");
+                        let exe_path = bin_dir.join(cli_filename());
+                        let term = std::env::var("TERM").unwrap_or_else(|_| "x-terminal-emulator".to_string());
+                        let _ = std::process::Command::new(term)
+                            .args(["-e", exe_path.to_str().unwrap(), "shell"])
+                            .spawn();
+                    }
+                }
+                std::process::exit(0);
+            }
         });
     }
 
@@ -605,7 +845,124 @@ impl InstallerApp {
             .min_size(egui::vec2(140.0, 36.0));
 
             if ui.add(retry_btn).clicked() {
-                self.state = InstallState::Ready;
+                self.state = InstallState::Config;
+            }
+        });
+    }
+
+    fn draw_repair(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("Modify Kinetix Installation")
+                    .size(22.0)
+                    .strong()
+                    .color(TEXT_PRIMARY)
+            );
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("Would you like to repair your existing installation or remove it completely?")
+                    .size(14.0)
+                    .color(TEXT_SECONDARY)
+            );
+            
+            ui.add_space(32.0);
+
+            let reinstall_btn = egui::Button::new(
+                egui::RichText::new("⟳  Repair / Reinstall")
+                    .size(15.0)
+                    .color(TEXT_PRIMARY)
+            )
+            .fill(ACCENT)
+            .rounding(6.0)
+            .min_size(egui::vec2(220.0, 42.0));
+
+            if ui.add(reinstall_btn).clicked() {
+                self.state = InstallState::Config;
+            }
+
+            ui.add_space(16.0);
+
+            let uninstall_btn = egui::Button::new(
+                egui::RichText::new("✖  Uninstall Kinetix")
+                    .size(15.0)
+                    .color(ERROR_COLOR)
+            )
+            .fill(BG_CARD)
+            .stroke(egui::Stroke::new(1.0, ERROR_COLOR))
+            .rounding(6.0)
+            .min_size(egui::vec2(220.0, 42.0));
+
+            if ui.add(uninstall_btn).clicked() {
+                self.state = InstallState::Uninstall;
+            }
+        });
+    }
+
+    fn draw_uninstall(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                egui::RichText::new("Uninstalling Kinetix")
+                    .size(22.0)
+                    .strong()
+                    .color(TEXT_PRIMARY)
+            );
+            
+            ui.add_space(20.0);
+
+            // Here we run the actual uninstall logic if we just entered this state
+            // For simplicity, we trigger it inline
+            let mut errors = vec![];
+            
+            let path_exists = self.install_path.exists();
+            if path_exists {
+                if let Err(e) = std::fs::remove_dir_all(&self.install_path) {
+                    errors.push(format!("Could not delete install directory: {}", e));
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                // Unregister Add/Remove Programs
+                let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+                let _ = hkcu.delete_subkey(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Kinetix");
+                
+                // We'll leave PATH cleanup for manual to avoid dangerous string replace for now
+                // Also leave Terminal profile (it's in LocalAppData)
+            }
+
+            if errors.is_empty() {
+                ui.label(
+                    egui::RichText::new("Kinetix has been successfully removed from your computer.")
+                        .size(14.0)
+                        .color(SUCCESS)
+                );
+            } else {
+                ui.label(
+                    egui::RichText::new("Uninstallation encountered some errors.")
+                        .size(14.0)
+                        .color(ERROR_COLOR)
+                );
+                for err in errors {
+                    ui.label(egui::RichText::new(err).size(11.0).color(TEXT_DIM));
+                }
+            }
+
+            ui.add_space(32.0);
+
+            let finish_btn = egui::Button::new(
+                egui::RichText::new("Close")
+                    .size(15.0)
+                    .color(TEXT_PRIMARY)
+                    .strong()
+            )
+            .fill(ACCENT)
+            .rounding(6.0)
+            .min_size(egui::vec2(160.0, 42.0));
+
+            if ui.add(finish_btn).clicked() {
+                std::process::exit(0);
             }
         });
     }

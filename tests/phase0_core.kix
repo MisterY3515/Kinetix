@@ -31,9 +31,9 @@ let numbers = [1, 2, 3, 4, 5]
 
 // 7. Flusso di controllo — If/Else
 if active {
-    print("Active is true")
+    println("Active is true")
 } else {
-    print("Active is false")
+    println("Active is false")
 }
 
 // 8. Flusso di controllo — While
@@ -41,22 +41,22 @@ mut counter = 0
 while counter < 5 {
     counter = counter + 1
 }
-print("Counter: ")
-print(counter)
+println("Counter: ")
+println(counter)
 
 // 9. Math (LLVM native)
 let s = math.sin(1.5708)
 let r = math.sqrt(144.0)
-print(" Sin: ")
-print(s)
-print(" Sqrt: ")
-print(r)
+println(" Sin: ")
+println(s)
+println(" Sqrt: ")
+println(r)
 
 // 10. Nesting
 if sum > 20 {
     if diff < 50 {
-        print(" Nested OK")
+        println(" Nested OK")
     }
 }
 
-print(" Phase 0 Test Complete")
+println(" Phase 0 Test Complete")

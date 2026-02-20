@@ -60,33 +60,53 @@ enum Commands {
     /// Open the Kinetix documentation in the browser
     #[command(alias = "documentation")]
     Docs,
+    /// Uninstall Kinetix from the system
+    Uninstall,
+    /// Repair or modify the Kinetix installation
+    Repair,
 }
 
-fn fatal_error(msg: &str, show_popup: bool) {
+#[cfg(target_os = "windows")]
+fn is_launched_from_explorer() -> bool {
+    // If the console process list returns <= 1, it means we're the only process attached to this console.
+    // This happens when Windows allocates a fresh conhost.exe for us because we were launched via double-click 
+    // from Explorer, rather than from an existing cmd.exe or wt.exe terminal process natively.
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetConsoleProcessList(processList: *mut u32, processCount: u32) -> u32;
+    }
+    unsafe {
+        let mut pids = [0u32; 2];
+        let count = GetConsoleProcessList(pids.as_mut_ptr(), 2);
+        count <= 1
+    }
+}
+
+fn fatal_error(msg: &str) {
     let version = env!("CARGO_PKG_VERSION");
     let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
 
-    eprintln!("\n[Kinetix v{} ({}) Error]", version, build);
-    eprintln!("{}", msg);
-    eprintln!("\nIf this error persists, report it at the project repository.");
+    eprintln!("\n\x1b[31;1m[Kinetix v{} ({}) Fatal Error]\x1b[0m\n", version, build);
+    
+    // Structured error output with color coding
+    for line in msg.lines() {
+        if line.to_lowercase().contains("warning") {
+            eprintln!("  \x1b[33m{}\x1b[0m", line);
+        } else {
+            eprintln!("  {}", line);
+        }
+    }
+    
+    eprintln!("\n\x1b[36mIf you think this is a bug, please open an issue on the GitHub repository:\x1b[0m");
+    eprintln!("\x1b[4mhttps://github.com/MisterY3515/Kinetix/issues\x1b[0m\n");
     
     #[cfg(target_os = "windows")]
-    if show_popup {
-        // Only show a popup window when launched from GUI (bundled .exe),
-        // since there is no terminal to see stderr output.
-        let safe_msg = msg.replace("\"", "'").replace("\n", " & echo ");
-        let script = format!(
-            "title Kinetix Error Reporter & color 0C & echo [Kinetix v{} ({}) Fatal Error] & echo. & echo {} & echo. & echo If this error persists, report it at the project repository. & echo. & pause",
-            version, build, safe_msg
-        );
-        let _ = std::process::Command::new("cmd.exe")
-            .args(&["/c", &script])
-            .spawn()
-            .and_then(|mut child| child.wait());
-    }
-    #[cfg(not(target_os = "windows"))]
     {
-        let _ = show_popup; // suppress unused warning
+        // If launched via double-click from Windows Explorer (no existing console),
+        // pause to prevent the window from disappearing silently.
+        if is_launched_from_explorer() {
+            let _ = std::process::Command::new("cmd.exe").arg("/c").arg("pause").status();
+        }
     }
     std::process::exit(1);
 }
@@ -97,14 +117,24 @@ fn main() {
         // Run the bundled program
         let mut vm = VM::new(program);
         if let Err(e) = vm.run() {
-            fatal_error(&format!("Runtime Error: {}", e), true); // popup for GUI
+            fatal_error(&format!("Runtime error:\n{}", e));
+        }
+
+        #[cfg(target_os = "windows")]
+        if is_launched_from_explorer() {
+            let _ = std::process::Command::new("cmd.exe").arg("/c").arg("pause").status();
         }
         return;
     }
 
     // 2. Otherwise/Normal CLI mode
     if let Err(e) = run() {
-        fatal_error(&format!("{}", e), false); // no popup, terminal visible
+        fatal_error(&format!("{}", e));
+    }
+
+    #[cfg(target_os = "windows")]
+    if is_launched_from_explorer() {
+        let _ = std::process::Command::new("cmd.exe").arg("/c").arg("pause").status();
     }
 }
 
@@ -159,6 +189,10 @@ fn run() -> Result<(), String> {
 
     match cli.command {
         Commands::Run { file } => {
+            if file.extension().and_then(|s| s.to_str()) == Some("kix") {
+                return Err(format!("'{}' is a source file. Use 'kivm compile --run {}' instead.", file.display(), file.display()));
+            }
+
             let data = fs::read(&file).map_err(|e| format!("Error reading {}: {}", file.display(), e))?;
             let mut cursor = std::io::Cursor::new(data);
             let program = exn::read_exn(&mut cursor).map_err(|e| format!("Error loading .exki: {}", e))?;
@@ -307,6 +341,12 @@ fn run() -> Result<(), String> {
         }
         Commands::Docs => {
             open_docs()?;
+        }
+        Commands::Uninstall => {
+            open_installer("--uninstall")?;
+        }
+        Commands::Repair => {
+            open_installer("--repair")?;
         }
         Commands::Test { path } => {
              let mut passed = 0;
@@ -609,5 +649,25 @@ fn open_docs() -> Result<(), String> {
     }
 
     println!("Opening documentation: {}", docs_path.display());
+    Ok(())
+}
+
+fn open_installer(arg: &str) -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    
+    // The installer is usually parallel to `kivm.exe` in `target/debug` or `dist/`
+    let mut installer_path = exe_path.parent()
+        .map(|p| p.join("installer.exe"))
+        .unwrap_or_else(|| PathBuf::from("installer.exe"));
+
+    if !installer_path.exists() {
+        // Fallback for development (e.g., if we're in `target/debug` but we want `installer.exe`)
+        installer_path = PathBuf::from("installer.exe");
+    }
+
+    std::process::Command::new(&installer_path)
+        .arg(arg)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn installer: {}", e))?;
     Ok(())
 }

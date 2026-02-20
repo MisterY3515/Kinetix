@@ -1,6 +1,6 @@
 fn main() {
     let a = "resource";
     let b = a; // Moved
-    print(a); // Error
+    println(a); // Error
 }
 main();

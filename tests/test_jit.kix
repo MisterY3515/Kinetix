@@ -1,35 +1,20 @@
-// Test file for Build 8b Native/JIT backend
-// Note: Strings and most standard library functions are not yet supported in native LLVM compilation
-// (they will be added in Build 9). This test focuses on primitives and control flow.
+// JIT Native Compilation Test for Build 9
 
-println("=== Kinetix Native LLVM Backend Test ===")
-println("If you see this, basic printf is working.")
+// 1. Strings
+let str = "Hello from Native LLVM String Struct!"
+let lang = "Kinetix"
 
-let a = 10
-let b = 25
-let sum = a + b
-println("Sum of 10 and 25 is expected to be 35. Checking logic...")
+// 2. Arrays
+let arr = [10, 20, 30]
 
-if sum == 35 {
-    println("Math and equality check passed!")
-} else {
-    println("Math check failed!")
-}
+// 3. Math Bindings
+let s = math.sin(1.57079) // ~1.0
+let r = math.sqrt(25.0)   // 5.0
+let p = math.pow(2.0, 3.0) // 8.0
 
-println("Testing while loop (1 to 5):")
-mut counter = 1
-while counter <= 5 {
-    println(counter)
-    counter = counter + 1
-}
-
-println("Testing conditionals with floats:")
-let pi = 3.14159
-let r = 2.0
-let area = pi * r * r
-
-if area > 10.0 {
-    println("Area is greater than 10.0 (Expected)")
-}
-
-println("Done.")
+println("Sin: ")
+println(s)
+println(" Sqrt: ")
+println(r)
+println(" Pow: ")
+println(p)

@@ -66,8 +66,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::Class => self.parse_class_statement(),
             Token::Struct => self.parse_struct_statement(),
             Token::Hash => self.parse_hash_directive(),
-            Token::Break => Some(Statement::Break),
-            Token::Continue => Some(Statement::Continue),
+            Token::Break => Some(Statement::Break { line: self.lexer.line }),
+            Token::Continue => Some(Statement::Continue { line: self.lexer.line }),
             _ => self.parse_expression_statement(),
         }
     }
@@ -83,16 +83,16 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 match &self.cur_token {
                     Token::Integer(n) => {
                         let build = *n;
-                        Some(Statement::Version { build })
+                        Some(Statement::Version { build, line: self.lexer.line })
                     }
                     _ => {
-                        self.errors.push(format!("Expected integer after #version, got {:?}", self.cur_token));
+                        self.push_error(format!("Expected integer after #version, got {:?}", self.cur_token));
                         None
                     }
                 }
             }
             _ => {
-                self.errors.push(format!("Unknown directive after #, got {:?}", self.peek_token));
+                self.push_error(format!("Unknown directive after #, got {:?}", self.peek_token));
                 None
             }
         }
@@ -128,7 +128,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     self.next_token();
                 }
                 
-                Some(Statement::Let { name, mutable, type_hint, value })
+                Some(Statement::Let { name, mutable, type_hint, value, line: self.lexer.line })
             }
             _ => {
                 self.peek_error(Token::Identifier("name".to_string()));
@@ -165,7 +165,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                         parameters: params,
                         body: self.arena.alloc(body),
                         return_type,
-                    }
+                    },
+                    line: self.lexer.line,
                 });
             }
             _ => return None,
@@ -195,6 +196,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             parameters: params,
             body: self.arena.alloc(body),
             return_type,
+            line: self.lexer.line,
         })
     }
 
@@ -211,7 +213,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
              Some(expr)
         };
 
-        Some(Statement::Return { value })
+        Some(Statement::Return { value, line: self.lexer.line })
     }
     
     // --- While ---
@@ -222,7 +224,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
         
-        Some(Statement::While { condition, body: self.arena.alloc(body) })
+        Some(Statement::While { condition, body: self.arena.alloc(body), line: self.lexer.line })
     }
     
     // --- For ---
@@ -237,7 +239,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         // Expect 'in'
         if self.cur_token != Token::In {
-            self.errors.push(format!("Expected 'in' after for iterator, got {:?}", self.cur_token));
+            self.push_error(format!("Expected 'in' after for iterator, got {:?}", self.cur_token));
             return None;
         }
         self.next_token();
@@ -247,7 +249,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
         
-        Some(Statement::For { iterator, range, body: self.arena.alloc(body) })
+        Some(Statement::For { iterator, range, body: self.arena.alloc(body), line: self.lexer.line })
     }
     
     // --- Include ---
@@ -292,7 +294,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
         }
         
-        Some(Statement::Include { path, alias })
+        Some(Statement::Include { path, alias, line: self.lexer.line })
     }
     
     // --- Class ---
@@ -379,7 +381,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             if self.cur_token == Token::Semicolon { self.next_token(); }
         }
         
-        Some(Statement::Class { name, parent, methods, fields })
+        Some(Statement::Class { name, parent, methods, fields, line: self.lexer.line })
     }
     
     // --- Struct ---
@@ -412,7 +414,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
         }
         
-        Some(Statement::Struct { name, fields })
+        Some(Statement::Struct { name, fields, line: self.lexer.line })
     }
 
     fn parse_expression_statement(&mut self) -> Option<Statement<'arena>> {
@@ -422,7 +424,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             self.next_token();
         }
         
-        Some(Statement::Expression { expression: expr })
+        Some(Statement::Expression { expression: expr, line: self.lexer.line })
     }
 
     // --- Expression Parsing ---
@@ -489,7 +491,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::Fn => self.parse_function_literal(), 
             Token::LBracket => self.parse_array_literal(),
             _ => {
-                self.errors.push(format!("No prefix parse function for {:?}", self.cur_token));
+                self.push_error(format!("No prefix parse function for {:?}", self.cur_token));
                 None
             }
         }
@@ -603,7 +605,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 self.next_token(); // move to if
                 let else_if = self.parse_if_expression()?;
                 let alt = Statement::Block { 
-                    statements: vec![Statement::Expression { expression: else_if }]
+                    statements: vec![Statement::Expression { expression: else_if, line: self.lexer.line }],
+                    line: self.lexer.line,
                 };
                 alternative = Some(alt);
             } else if self.expect_peek(Token::LBrace) {
@@ -629,7 +632,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             self.next_token();
         }
         
-        Some(Statement::Block { statements })
+        Some(Statement::Block { statements, line: self.lexer.line })
     }
     
     fn parse_function_literal(&mut self) -> Option<Expression<'arena>> {
@@ -724,8 +727,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
     }
     
+    pub fn push_error(&mut self, msg: String) {
+        self.errors.push(format!("Line {}: {}", self.lexer.line, msg));
+    }
+
     fn peek_error(&mut self, token: Token) {
-        self.errors.push(format!("Expected next token to be {:?}, got {:?} instead", token, self.peek_token));
+        self.push_error(format!("Expected next token to be {:?}, got {:?} instead", token, self.peek_token));
     }
 }
 

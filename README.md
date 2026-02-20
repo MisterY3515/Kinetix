@@ -15,7 +15,7 @@ Kinetix is designed to make it easy to write **software tools and automation scr
 ### Hello World
 
 ```
-print("Hello, world!")
+println("Hello, world!")
 ```
 
 ### Variables
@@ -38,8 +38,8 @@ fn greet(who: string) -> string {
     return "Hello, " + who + "!"
 }
 
-print(add(3, 4))      // 7
-print(greet("World")) // Hello, World!
+println(add(3, 4))      // 7
+println(greet("World")) // Hello, World!
 ```
 
 ### If / Else
@@ -48,11 +48,11 @@ print(greet("World")) // Hello, World!
 let score = 85
 
 if score >= 90 {
-    print("A")
+    println("A")
 } else if score >= 80 {
-    print("B")
+    println("B")
 } else {
-    print("C")
+    println("C")
 }
 ```
 
@@ -61,7 +61,7 @@ if score >= 90 {
 ```
 mut x = 10
 while x > 0 {
-    print(x)
+    println(x)
     x = x - 1
 }
 ```
@@ -72,7 +72,7 @@ while x > 0 {
 let fruits = ["apple", "banana", "cherry"]
 
 for fruit in fruits {
-    print(fruit)
+    println(fruit)
 }
 ```
 
@@ -81,7 +81,7 @@ for fruit in fruits {
 ```
 // range(start, end) returns an array [start..end)
 for i in range(0, 10) {
-    print(i)
+    println(i)
 }
 ```
 
@@ -90,15 +90,15 @@ for i in range(0, 10) {
 ```
 let nums = [5, 3, 8, 1, 9, 2]
 
-print(len(nums))      // 6
-print(min(nums))      // 1
-print(max(nums))      // 9
+println(len(nums))      // 6
+println(min(nums))      // 1
+println(max(nums))      // 9
 
 let sorted = sort(nums)
-print(sorted)          // [1, 2, 3, 5, 8, 9]
+println(sorted)          // [1, 2, 3, 5, 8, 9]
 
 let reversed = reverse(nums)
-print(reversed)
+println(reversed)
 ```
 
 ### String Operations
@@ -106,12 +106,12 @@ print(reversed)
 ```
 let text = "Hello, Kinetix!"
 
-print(to_upper(text))              // HELLO, KINETIX!
-print(to_lower(text))              // hello, kinetix!
-print(contains(text, "Kinetix"))   // true
-print(split(text, ", "))           // ["Hello", "Kinetix!"]
-print(replace(text, "Hello", "Hi")) // Hi, Kinetix!
-print(trim("  spaces  "))         // spaces
+println(to_upper(text))              // HELLO, KINETIX!
+println(to_lower(text))              // hello, kinetix!
+println(contains(text, "Kinetix"))   // true
+println(split(text, ", "))           // ["Hello", "Kinetix!"]
+println(replace(text, "Hello", "Hi")) // Hi, Kinetix!
+println(trim("  spaces  "))         // spaces
 ```
 
 ### Lambda Functions
@@ -121,17 +121,17 @@ let double = fn(x: int) -> int {
     return x * 2
 }
 
-print(double(21))  // 42
+println(double(21))  // 42
 ```
 
 ### Math Module
 
 ```
-print(Math.sqrt(144.0))        // 12.0
-print(Math.abs(-5))            // 5
-print(Math.clamp(15, 0, 10))   // 10
-print(Math.lerp(0.0, 100.0, 0.5)) // 50.0
-print(Math.sin(Math.rad(90.0)))    // 1.0
+println(Math.sqrt(144.0))        // 12.0
+println(Math.abs(-5))            // 5
+println(Math.clamp(15, 0, 10))   // 10
+println(Math.lerp(0.0, 100.0, 0.5)) // 50.0
+println(Math.sin(Math.rad(90.0)))    // 1.0
 ```
 
 ### Multi-File Projects
@@ -147,7 +147,7 @@ fn square(n: int) -> int {
 // main.kix
 #include "math_utils.kix"
 
-print(square(7))  // 49
+println(square(7))  // 49
 ```
 
 ### Terminal Colors (Build 5)
@@ -156,7 +156,7 @@ print(square(7))  // 49
 term.clear()
 term.color_print("green", "SUCCESS: All tests passed!")
 term.color_print("red", "ERROR: Something went wrong")
-print(term.bold("important") + " and " + term.italic("elegant"))
+println(term.bold("important") + " and " + term.italic("elegant"))
 ```
 
 ### Interactive Shell
@@ -165,7 +165,7 @@ print(term.bold("important") + " and " + term.italic("elegant"))
 $ kivm shell
 Kinetix Shell v0.0.4 build 9
 
-~ ❯ print(2 + 2)
+~ ❯ println(2 + 2)
 4
 ~ ❯ ls
 ~ ❯ cd projects

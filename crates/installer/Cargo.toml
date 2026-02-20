@@ -9,11 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 eframe = "0.29.1"
-rfd = "0.12" # construct native file dialogs
-
-directories = "5.0" # find standard directories
+rfd = "0.14"
+directories = "5.0"
+image = { version = "0.24", default-features = false, features = ["png"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
 
-
+[build-dependencies]
+winres = "0.1"

@@ -162,10 +162,15 @@ pub struct VM {
 
 impl VM {
     pub fn new(program: CompiledProgram) -> Self {
+        let mut globals = HashMap::new();
+        for name in crate::builtins::BUILTIN_NAMES {
+            globals.insert(name.to_string(), Value::NativeFn(name.to_string()));
+        }
+
         Self {
             program,
             call_stack: Vec::new(),
-            globals: HashMap::new(),
+            globals,
             output: Vec::new(),
         }
     }
@@ -184,7 +189,10 @@ impl VM {
                 break;
             }
             
-            let result = self.step()?;
+            let result = match self.step() {
+                Ok(r) => r,
+                Err(e) => return Err(self.runtime_error(&e)),
+            };
             match result {
                 StepResult::Continue => {},
                 StepResult::Halt => break,
@@ -210,6 +218,23 @@ impl VM {
             }
         }
         Ok(())
+    }
+
+    /// Build a detailed runtime error string with function name, line number, and message.
+    fn runtime_error(&self, msg: &str) -> String {
+        if let Some(frame) = self.call_stack.last() {
+            let fn_name = &frame.function.name;
+            // ip has already been incremented by step(), so the faulting instruction is ip - 1
+            let ip = if frame.ip > 0 { frame.ip - 1 } else { 0 };
+            let line = frame.function.line_map.get(ip).copied().unwrap_or(0);
+            if line > 0 {
+                format!("[line {}] in {}: {}", line, fn_name, msg)
+            } else {
+                format!("in {}: {}", fn_name, msg)
+            }
+        } else {
+            msg.to_string()
+        }
     }
 
     pub fn step(&mut self) -> Result<StepResult, String> {
@@ -488,10 +513,16 @@ impl VM {
             Value::NativeFn(name) => {
                 let result = builtins::call_builtin(&name, &args, self)?;
                 if let Some(reg) = return_reg {
-                    // If we just called access to native, where do we write result?
-                    // call_value pushes? NativeFn doesn't push CallFrame.
-                    // So we must write to caller's frame?
-                    // But call_value logic for native:
+                    if let Some(frame) = self.call_stack.last_mut() {
+                        frame.set_reg(reg, result);
+                    }
+                }
+                Ok(())
+            }
+            Value::Str(name) => {
+                let result = builtins::call_builtin(&name, &args, self)
+                    .map_err(|_| format!("Cannot call Str('{}') (not expecting a native function)", name))?;
+                if let Some(reg) = return_reg {
                     if let Some(frame) = self.call_stack.last_mut() {
                         frame.set_reg(reg, result);
                     }

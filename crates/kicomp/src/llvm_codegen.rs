@@ -119,11 +119,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), String> {
         match stmt {
-            Statement::Expression(expr) => {
-                self.compile_expression(expr)?;
+            Statement::Expression { expression, .. } => {
+                self.compile_expression(expression)?;
                 Ok(())
             }
-            Statement::Let { name, value, .. } | Statement::Mut { name, value, .. } => {
+            Statement::Let { name, value, .. } => {
                 let init_val = self.compile_expression(value)?;
                 let parent = self.current_fn.unwrap();
                 let entry = parent.get_first_basic_block().unwrap();
@@ -154,7 +154,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
             Statement::If { condition, consequence, alternative } => {
                 self.compile_if(condition, consequence, alternative.as_deref())
             }
-            Statement::While { condition, body } => {
+            Statement::While { condition, body, .. } => {
                 self.compile_while(condition, body)
             }
              Statement::Function { name, parameters, body, .. } => {

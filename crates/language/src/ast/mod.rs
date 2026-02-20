@@ -7,50 +7,61 @@ pub enum Statement<'a> {
         mutable: bool,
         type_hint: Option<String>,
         value: Expression<'a>,
+        line: usize,
     },
     Return {
         value: Option<Expression<'a>>,
+        line: usize,
     },
     Expression {
         expression: Expression<'a>,
+        line: usize,
     },
     Block {
         statements: Vec<Statement<'a>>,
+        line: usize,
     },
     Function {
         name: String,
         parameters: Vec<(String, String)>, // (name, type)
         body: &'a Statement<'a>, // Block
         return_type: String,
+        line: usize,
     },
     While {
         condition: Expression<'a>,
         body: &'a Statement<'a>,
+        line: usize,
     },
     For {
         iterator: String,
         range: Expression<'a>,
         body: &'a Statement<'a>,
+        line: usize,
     },
     Class {
         name: String,
         parent: Option<String>,
         methods: Vec<Statement<'a>>, // Function statements
         fields: Vec<(bool, String, String)>, // (is_public, name, type)
+        line: usize,
     },
     Struct {
         name: String,
         fields: Vec<(String, String)>,
+        line: usize,
     },
     Include {
         path: String,
         alias: Option<String>,
+        line: usize,
     },
     Version {
         build: i64,
+        line: usize,
     },
-    Break,
-    Continue,
+    Break { line: usize },
+    Continue { line: usize },
 }
 
 #[derive(Debug)]

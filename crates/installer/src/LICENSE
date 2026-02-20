@@ -1,0 +1,27 @@
+Kinetix Software License
+Copyright (c) 2026 MisterY3515
+
+1. GRANT OF LICENSE
+The Author (MisterY3515) hereby grants you a non-exclusive, royalty-free right to download, install, and use the Kinetix software (including the compiler, virtual machine, and related tools) strictly for personal, educational, or testing purposes.
+
+2. ATTRIBUTION REQUIREMENTS (CREDITS)
+Any program, script, or software created using Kinetix and distributed to third parties must include a visible reference to the original project, such as:
+
+"Built with Kinetix by MisterY3515"
+
+3. RESTRICTIONS
+By using Kinetix, you explicitly agree NOT to:
+
+Modify: Alter, patch, or modify the source code or binaries of the Kinetix software.
+
+Redistribute: Upload, publish, or distribute the Kinetix software (source or binaries) to other websites, repositories, cloud services, or physical media without prior written consent from the Author.
+
+Reverse Engineer: Decompile or attempt to derive the source code of any components distributed in binary format.
+
+Sublicense: Sell, rent, or lease the Kinetix software to third parties.
+
+4. EXPERIMENTAL NATURE & LIMITATION OF LIABILITY
+This software is provided "AS IS", without warranty of any kind, express or implied. As this is an experimental and educational project, the Author does not guarantee the absence of bugs, system stability, or fitness for any specific purpose. In no event shall the Author be liable for any damages, data loss, or malfunctions resulting from the use of Kinetix.
+
+5. INTELLECTUAL PROPERTY
+All rights, titles, and interests in and to Kinetix (including the language design, KiVM, logos, and original source code) remain the exclusive property of MisterY3515.

@@ -72,6 +72,7 @@ pub struct Lexer<'a> {
     position: usize,
     read_position: usize,
     ch: Option<char>,
+    pub line: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -81,12 +82,16 @@ impl<'a> Lexer<'a> {
             position: 0,
             read_position: 0,
             ch: None,
+            line: 1,
         };
         l.read_char();
         l
     }
 
     fn read_char(&mut self) {
+        if self.ch == Some('\n') {
+            self.line += 1;
+        }
         if self.read_position >= self.input.len() {
             self.ch = None;
         } else {
