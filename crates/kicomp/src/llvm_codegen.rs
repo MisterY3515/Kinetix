@@ -62,8 +62,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
         
         self.current_fn = Some(main_fn);
 
-        // Declare printf
-        self.declare_printf();
+        // Declare stdlib functions (printf, malloc, strings, math)
+        self.declare_stdlib();
 
         for stmt in statements {
             self.compile_statement(stmt)?;
@@ -80,11 +80,41 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(())
     }
 
-    fn declare_printf(&self) {
+    fn declare_stdlib(&self) {
         let i32_type = self.context.i32_type();
-        let str_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
-        let printf_type = i32_type.fn_type(&[str_type.into()], true); // varargs
+        let i64_type = self.context.i64_type();
+        let f64_type = self.context.f64_type();
+        let i8_ptr_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
+
+        // libc IO
+        let printf_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
         self.module.add_function("printf", printf_type, None);
+
+        // libc Memory
+        let malloc_type = i8_ptr_type.fn_type(&[i64_type.into()], false);
+        self.module.add_function("malloc", malloc_type, None);
+
+        let strcmp_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
+        self.module.add_function("strcmp", strcmp_type, None);
+
+        let memcpy_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into(), i64_type.into()], false);
+        self.module.add_function("memcpy", memcpy_type, None);
+
+        // libm Math
+        let math_fn_type = f64_type.fn_type(&[f64_type.into()], false);
+        self.module.add_function("sin", math_fn_type, None);
+        self.module.add_function("cos", math_fn_type, None);
+        self.module.add_function("sqrt", math_fn_type, None);
+        let math_fn_2_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        self.module.add_function("pow", math_fn_2_type, None);
+
+        // Struct Types
+        let string_struct = self.context.opaque_struct_type("String");
+        string_struct.set_body(&[i64_type.into(), i8_ptr_type.into()], false);
+
+        let array_struct = self.context.opaque_struct_type("Array");
+        // { i64 len, i64 cap, i64* data } - simplistic array of integers for naive LLVM execution
+        array_struct.set_body(&[i64_type.into(), i64_type.into(), i64_type.ptr_type(inkwell::AddressSpace::default()).into()], false);
     }
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), String> {
@@ -140,8 +170,64 @@ impl<'ctx> LLVMCodegen<'ctx> {
             Expression::Float(f) => Ok(self.context.f64_type().const_float(*f).into()),
             Expression::Boolean(b) => Ok(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
             Expression::String(s) => {
-                let s_ptr = self.builder.build_global_string_ptr(s, "str").map_err(|e| e.to_string())?;
-                Ok(s_ptr.as_pointer_value().into()) // Treated as ptr
+                let string_type = self.context.get_struct_type("String").unwrap();
+                let i64_type = self.context.i64_type();
+                let mut str_struct = string_type.get_undef();
+                
+                let s_ptr = self.builder.build_global_string_ptr(s, "str_data").map_err(|e| e.to_string())?;
+                let len_val = i64_type.const_int(s.len() as u64, false);
+                
+                str_struct = self.builder.build_insert_value(str_struct, len_val, 0, "insert_len")
+                    .map_err(|e| e.to_string())?
+                    .into_struct_value();
+                str_struct = self.builder.build_insert_value(str_struct, s_ptr.as_pointer_value(), 1, "insert_ptr")
+                    .map_err(|e| e.to_string())?
+                    .into_struct_value();
+                
+                Ok(str_struct.into())
+            }
+            Expression::ArrayLiteral(elements) => {
+                let array_type = self.context.get_struct_type("Array").unwrap();
+                let i64_type = self.context.i64_type();
+                let mut arr_struct = array_type.get_undef();
+                
+                let len = elements.len() as u64;
+                let len_val = i64_type.const_int(len, false);
+                
+                let malloc_fn = self.module.get_function("malloc").unwrap();
+                let bytes_val = i64_type.const_int(len * 8, false);
+                let data_ptr = self.builder.build_call(malloc_fn, &[bytes_val.into()], "malloc_array")
+                    .map_err(|e| e.to_string())?
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap();
+                
+                let i64_ptr_type = i64_type.ptr_type(inkwell::AddressSpace::default());
+                let data_i64_ptr = self.builder.build_pointer_cast(data_ptr.into_pointer_value(), i64_ptr_type, "cast").unwrap();
+                
+                for (i, elem) in elements.iter().enumerate() {
+                    let elem_val = self.compile_expression(elem)?;
+                    let idx_val = i64_type.const_int(i as u64, false);
+                    let ptr = unsafe { self.builder.build_gep(i64_type, data_i64_ptr, &[idx_val], "elem_ptr") }
+                        .map_err(|e| e.to_string())?;
+                    // For MVP simplicity, we forcefully cast floats to bits or just store integers
+                    let to_store = if elem_val.is_int_value() {
+                        elem_val.into_int_value()
+                    } else if elem_val.is_float_value() {
+                        // For simplicity in array storing, cast float to bitwise i64
+                        self.builder.build_bitcast(elem_val.into_float_value(), i64_type, "bitcast_float").unwrap().into_int_value()
+                    } else {
+                        // Struct or other? Just store 0 for now as dummy.
+                        i64_type.const_int(0, false)
+                    };
+                    self.builder.build_store(ptr, to_store).map_err(|e| e.to_string())?;
+                }
+                
+                arr_struct = self.builder.build_insert_value(arr_struct, len_val, 0, "insert_len").unwrap().into_struct_value();
+                arr_struct = self.builder.build_insert_value(arr_struct, len_val, 1, "insert_cap").unwrap().into_struct_value();
+                arr_struct = self.builder.build_insert_value(arr_struct, data_i64_ptr, 2, "insert_data").unwrap().into_struct_value();
+                
+                Ok(arr_struct.into())
             }
             Expression::Identifier(name) => {
                 match self.variables.get(name) {
@@ -162,6 +248,32 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 if let Expression::Identifier(name) = function.as_ref() {
                     if name == "print" || name == "println" {
                         return self.compile_print(arguments, name == "println");
+                    }
+                    if name.starts_with("math.") {
+                        let fn_name = name.strip_prefix("math.").unwrap();
+                        match fn_name {
+                            "sin" | "cos" | "sqrt" => {
+                                if arguments.len() != 1 { return Err(format!("{} requires 1 argument", name)); }
+                                let arg = self.compile_expression(&arguments[0])?;
+                                let arg_f = if arg.is_int_value() {
+                                    self.builder.build_signed_int_to_float(arg.into_int_value(), self.context.f64_type(), "cast").unwrap()
+                                } else { arg.into_float_value() };
+                                let f = self.module.get_function(fn_name).unwrap();
+                                let ret = self.builder.build_call(f, &[arg_f.into()], "math").unwrap().try_as_basic_value().left().unwrap();
+                                return Ok(ret);
+                            }
+                            "pow" => {
+                                if arguments.len() != 2 { return Err("pow requires 2 arguments".to_string()); }
+                                let a1 = self.compile_expression(&arguments[0])?;
+                                let a2 = self.compile_expression(&arguments[1])?;
+                                let f1 = if a1.is_int_value() { self.builder.build_signed_int_to_float(a1.into_int_value(), self.context.f64_type(), "c").unwrap() } else { a1.into_float_value() };
+                                let f2 = if a2.is_int_value() { self.builder.build_signed_int_to_float(a2.into_int_value(), self.context.f64_type(), "c").unwrap() } else { a2.into_float_value() };
+                                let f = self.module.get_function("pow").unwrap();
+                                let ret = self.builder.build_call(f, &[f1.into(), f2.into()], "pow").unwrap().try_as_basic_value().left().unwrap();
+                                return Ok(ret);
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 Err("Function calls not implemented yet".to_string())

@@ -62,15 +62,23 @@ enum Commands {
     Docs,
 }
 
-fn fatal_error(msg: &str) {
-    eprintln!("\n[Kinetix Error]\n{}", msg);
+fn fatal_error(msg: &str, show_popup: bool) {
+    let version = env!("CARGO_PKG_VERSION");
+    let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
+
+    eprintln!("\n[Kinetix v{} ({}) Error]", version, build);
+    eprintln!("{}", msg);
+    eprintln!("\nIf this error persists, report it at the project repository.");
     
     #[cfg(target_os = "windows")]
-    {
-        // Spawns a dedicated terminal window to ensure the error is seen,
-        // specifically fulfilling the request to "open a terminal window with the error".
+    if show_popup {
+        // Only show a popup window when launched from GUI (bundled .exe),
+        // since there is no terminal to see stderr output.
         let safe_msg = msg.replace("\"", "'").replace("\n", " & echo ");
-        let script = format!("title Kinetix Error Reporter & color 0C & echo [Kinetix Fatal Error] & echo. & echo {} & echo. & pause", safe_msg);
+        let script = format!(
+            "title Kinetix Error Reporter & color 0C & echo [Kinetix v{} ({}) Fatal Error] & echo. & echo {} & echo. & echo If this error persists, report it at the project repository. & echo. & pause",
+            version, build, safe_msg
+        );
         let _ = std::process::Command::new("cmd.exe")
             .args(&["/c", &script])
             .spawn()
@@ -78,9 +86,7 @@ fn fatal_error(msg: &str) {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        eprintln!("\nPress Enter to exit...");
-        let mut s = String::new();
-        let _ = std::io::stdin().read_line(&mut s);
+        let _ = show_popup; // suppress unused warning
     }
     std::process::exit(1);
 }
@@ -91,14 +97,14 @@ fn main() {
         // Run the bundled program
         let mut vm = VM::new(program);
         if let Err(e) = vm.run() {
-            fatal_error(&format!("Runtime Error: {}", e));
+            fatal_error(&format!("Runtime Error: {}", e), true); // popup for GUI
         }
         return;
     }
 
     // 2. Otherwise/Normal CLI mode
     if let Err(e) = run() {
-        fatal_error(&format!("{}", e));
+        fatal_error(&format!("{}", e), false); // no popup, terminal visible
     }
 }
 

@@ -572,7 +572,7 @@ impl InstallerApp {
         });
     }
 
-    fn draw_failed(&self, ui: &mut egui::Ui, msg: &str) {
+    fn draw_failed(&mut self, ui: &mut egui::Ui, msg: &str) {
         ui.add_space(40.0);
         ui.vertical_centered(|ui| {
             ui.label(
@@ -594,6 +594,19 @@ impl InstallerApp {
                     .color(TEXT_SECONDARY)
                     .monospace()
             );
+            ui.add_space(24.0);
+            let retry_btn = egui::Button::new(
+                egui::RichText::new("⟳  Retry")
+                    .size(15.0)
+                    .color(TEXT_PRIMARY)
+            )
+            .fill(ACCENT)
+            .rounding(6.0)
+            .min_size(egui::vec2(140.0, 36.0));
+
+            if ui.add(retry_btn).clicked() {
+                self.state = InstallState::Ready;
+            }
         });
     }
 }

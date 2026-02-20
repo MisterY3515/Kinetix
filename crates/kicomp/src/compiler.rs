@@ -409,6 +409,28 @@ impl Compiler {
                     }
                 }
 
+                // Module builtin: module.function(args) → flatten to "module.function" builtin call
+                if let Expression::MemberAccess { object, member } = *function {
+                    if let Expression::Identifier(module_name) = *object {
+                        let flat_name = format!("{}.{}", module_name, member);
+                        let call_reg = self.alloc_register();
+                        let name_idx = self.current_fn().add_constant(Constant::String(flat_name));
+                        self.current_fn().emit(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
+                        for (i, arg) in arguments.iter().enumerate() {
+                            let expected_reg = call_reg + 1 + i as u16;
+                            let arg_reg = self.compile_expression(arg)?;
+                            if arg_reg != expected_reg {
+                                while self.next_temp <= expected_reg {
+                                    self.alloc_register();
+                                }
+                                self.current_fn().emit(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                            }
+                        }
+                        self.current_fn().emit(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+                        return Ok(call_reg);
+                    }
+                }
+
                 let orig_func_reg = self.compile_expression(function)?;
                 let call_reg = self.alloc_register();
                 self.current_fn().emit(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));

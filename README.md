@@ -163,7 +163,7 @@ print(term.bold("important") + " and " + term.italic("elegant"))
 
 ```bash
 $ kivm shell
-Kinetix Shell v0.0.3 build 6
+Kinetix Shell v0.0.4 build 9
 
 ~ ❯ print(2 + 2)
 4
@@ -248,7 +248,7 @@ If you prefer to build it manually:
 2. Then, build the installer: `cd crates/installer && cargo build --release`
 3. The final `installer.exe` will be located in the `crates/installer/target/release/` folder.
 
-## Benchmarks (v0.0.3 Build 6)
+## Benchmarks (v0.0.4 Build 9)
 
 Parser speed tested on a synthetic source of **3,650 lines** (~70 KB) containing variables, functions, classes, loops, expressions, and arrays.
 

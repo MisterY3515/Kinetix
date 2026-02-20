@@ -309,6 +309,16 @@ impl VM {
                  let right = frame.reg(instr.c);
                  frame.set_reg(instr.a, Value::Bool(left != right));
             }
+            Opcode::And => {
+                 let left = frame.reg(instr.b).is_truthy();
+                 let right = frame.reg(instr.c).is_truthy();
+                 frame.set_reg(instr.a, Value::Bool(left && right));
+            }
+            Opcode::Or => {
+                 let left = frame.reg(instr.b).is_truthy();
+                 let right = frame.reg(instr.c).is_truthy();
+                 frame.set_reg(instr.a, Value::Bool(left || right));
+            }
 
             Opcode::Print => {
                 let val = frame.reg(instr.a);
@@ -373,6 +383,15 @@ impl VM {
                     },
                     _ => return Err("GetMember: target not a map".into()),
                 }
+            }
+            Opcode::MakeArray => {
+                let start_reg = instr.a;
+                let count = instr.b as usize;
+                let mut arr = Vec::with_capacity(count);
+                for i in 0..count {
+                    arr.push(frame.reg(start_reg + i as u16).clone());
+                }
+                frame.set_reg(instr.a, Value::Array(arr));
             }
             Opcode::MakeMap => {
                 let count = instr.b as u16; 
