@@ -6,3 +6,7 @@ pub mod compiler;
 #[cfg(feature = "llvm")]
 pub mod llvm_codegen;
 pub mod exn;
+pub mod types;
+pub mod symbol;
+pub mod hir;
+pub mod typeck;

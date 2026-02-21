@@ -163,6 +163,7 @@ pub struct CompiledFunction {
     pub constants: Vec<Constant>,
     pub param_names: Vec<String>,
     /// Maps each instruction index to a source line number (1-based).
+    #[serde(default)]
     pub line_map: Vec<u32>,
 }
 

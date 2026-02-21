@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 6;
+pub const CURRENT_BUILD: i64 = 10;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
@@ -163,8 +163,27 @@ impl Compiler {
             }
             Statement::Return { value, .. } => {
                 if let Some(val) = value {
-                    let reg = self.compile_expression(val)?;
-                    self.emit_instr(Instruction::a_only(Opcode::Return, reg));
+                    // TCO: if the return value is a function call, emit TailCall instead
+                    if let Expression::Call { function, arguments } = val {
+                        // Compile the function reference
+                        let func_reg = self.compile_expression(function)?;
+                        let call_reg = self.alloc_register();
+                        self.emit_instr(Instruction::ab(Opcode::SetLocal, call_reg, func_reg));
+                        for (i, arg) in arguments.iter().enumerate() {
+                            let expected_reg = call_reg + 1 + i as u16;
+                            let arg_reg = self.compile_expression(arg)?;
+                            if arg_reg != expected_reg {
+                                while self.next_temp <= expected_reg {
+                                    self.alloc_register();
+                                }
+                                self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                            }
+                        }
+                        self.emit_instr(Instruction::ab(Opcode::TailCall, call_reg, arguments.len() as u16));
+                    } else {
+                        let reg = self.compile_expression(val)?;
+                        self.emit_instr(Instruction::a_only(Opcode::Return, reg));
+                    }
                 } else {
                     self.emit_instr(Instruction::a_only(Opcode::ReturnVoid, 0));
                 }

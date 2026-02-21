@@ -850,7 +850,7 @@ mod tests {
         assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
         assert_eq!(prog.statements.len(), 1);
         match &prog.statements[0] {
-            Statement::Struct { name, fields } => {
+            Statement::Struct { name, fields, .. } => {
                 assert_eq!(name, "Vector2");
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0], ("x".to_string(), "float".to_string()));
@@ -886,7 +886,7 @@ mod tests {
         assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
         assert_eq!(prog.statements.len(), 1);
         match &prog.statements[0] {
-            Statement::Expression { expression } => {
+            Statement::Expression { expression, .. } => {
                 assert!(matches!(expression, Expression::MemberAccess { .. }));
             },
             _ => panic!("Expected expression"),
