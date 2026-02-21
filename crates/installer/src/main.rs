@@ -385,7 +385,12 @@ impl InstallerApp {
 
                 // Try GitHub download
                 let build_no = option_env!("KINETIX_BUILD").unwrap_or("10"); // Defaults to 10 if not set via cargo build
+                
+                // GitHub automatically generates "Source code (zip)" for releases.
+                // The URL for this is /archive/refs/tags/{TAG}.zip
                 let url_tag = format!("https://github.com/MisterY3515/Kinetix-Documentation/archive/refs/tags/{}.zip", build_no);
+                
+                // Fallback to main branch archive just in case
                 let url_main = "https://github.com/MisterY3515/Kinetix-Documentation/archive/refs/heads/main.zip";
 
                 self.log(format!("Downloading docs for build {}...", build_no));
@@ -393,7 +398,9 @@ impl InstallerApp {
                 let mut download_success = false;
                 
                 // Helper closure to download and extract
-                let download_and_extract = |url: &str| -> Result<(), Box<dyn std::error::Error>> {
+                // `strip_root` boolean tells us whether to strip the first folder component
+                // (source archives have a root folder, release assets typically do not).
+                let download_and_extract = |url: &str, strip_root: bool| -> Result<(), Box<dyn std::error::Error>> {
                     let response = ureq::get(url).call()?;
                     let mut reader = response.into_reader();
                     let mut zip_bytes = Vec::new();
@@ -409,14 +416,17 @@ impl InstallerApp {
                             None => continue,
                         };
                         
-                        // The github zip puts everything in a root folder like "Kinetix-Documentation-10/"
-                        // We strip the first component.
-                        let components: Vec<_> = outpath.components().collect();
-                        if components.is_empty() { continue; }
-                        let stripped_path: PathBuf = components[1..].iter().collect();
-                        if stripped_path.as_os_str().is_empty() { continue; }
+                        let final_path = if strip_root {
+                            let components: Vec<_> = outpath.components().collect();
+                            if components.is_empty() { continue; }
+                            let stripped_path: PathBuf = components[1..].iter().collect();
+                            if stripped_path.as_os_str().is_empty() { continue; }
+                            stripped_path
+                        } else {
+                            outpath
+                        };
                         
-                        let dest_path = docs_dest.join(stripped_path);
+                        let dest_path = docs_dest.join(final_path);
                         
                         if (*file.name()).ends_with('/') {
                             fs::create_dir_all(&dest_path)?;
@@ -434,9 +444,9 @@ impl InstallerApp {
                 };
 
                 // Try tagged release
-                if let Err(_) = download_and_extract(&url_tag) {
-                    self.log(format!("Failed to download tag {}. Trying main branch...", build_no));
-                    if let Err(_) = download_and_extract(url_main) {
+                if let Err(_) = download_and_extract(&url_tag, true) {
+                    self.log(format!("Failed to download tag {}. Trying main branch archive...", build_no));
+                    if let Err(_) = download_and_extract(url_main, true) {
                         self.log("Failed to download main branch.");
                     } else {
                         self.log("Successfully downloaded and extracted docs from main branch.");
