@@ -105,10 +105,7 @@ impl Compiler {
     fn resolve_use(&mut self, name: &str) -> Result<Option<u16>, String> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(info) = scope.locals.get_mut(name) {
-                if info.moved {
-                    return Err(format!("Use of moved value '{}'", name));
-                }
-                info.moved = true; // Ownership transfer
+                // The Borrow Checker (borrowck.rs) acts as the authority on ownership.
                 return Ok(Some(info.reg));
             }
         }

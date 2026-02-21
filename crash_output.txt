@@ -1,8 +1,0 @@
-
-[Kinetix v0.0.4 (Build 9) Fatal Error]
-
-  Runtime error: [line 5] in <main>: Invalid types for Add
-
-Se pensi che sia un errore, apri una issue sul repository GitHub:
-https://github.com/MisterY3515/Kinetix/issues
-

@@ -48,6 +48,7 @@ pub enum Token {
     Or,       // ||
     Dot,
     DotDot,   // ..  (Range)
+    Ampersand,// &
     
     // Delimiters
     LParen,
@@ -216,7 +217,7 @@ impl<'a> Lexer<'a> {
                     self.read_char();
                     Token::And
                 } else {
-                    Token::Illegal
+                    Token::Ampersand
                 }
             },
             Some('|') => {

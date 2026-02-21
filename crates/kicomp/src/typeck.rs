@@ -68,17 +68,17 @@ impl TypeContext {
     fn collect_stmt(&mut self, stmt: &HirStatement, constraints: &mut Vec<Constraint>) {
         match &stmt.kind {
             HirStmtKind::Let { name: _, mutable: _, value } => {
-                self.collect_expr(value, constraints);
+                self.collect_expr(value, stmt.line, constraints);
                 // The Let's type must match the value's type
                 constraints.push(Constraint::new(stmt.ty.clone(), value.ty.clone(), stmt.line));
             }
             HirStmtKind::Return { value } => {
                 if let Some(v) = value {
-                    self.collect_expr(v, constraints);
+                    self.collect_expr(v, stmt.line, constraints);
                 }
             }
             HirStmtKind::Expression { expression } => {
-                self.collect_expr(expression, constraints);
+                self.collect_expr(expression, stmt.line, constraints);
             }
             HirStmtKind::Block { statements } => {
                 for s in statements {
@@ -97,109 +97,112 @@ impl TypeContext {
                 }
             }
             HirStmtKind::While { condition, body } => {
-                self.collect_expr(condition, constraints);
+                self.collect_expr(condition, stmt.line, constraints);
                 // Condition must be bool
                 constraints.push(Constraint::new(Type::Bool, condition.ty.clone(), stmt.line));
                 self.collect_stmt(body, constraints);
             }
             HirStmtKind::For { range, body, .. } => {
-                self.collect_expr(range, constraints);
+                self.collect_expr(range, stmt.line, constraints);
                 self.collect_stmt(body, constraints);
             }
             HirStmtKind::Break | HirStmtKind::Continue => {}
         }
     }
 
-    fn collect_expr(&mut self, expr: &HirExpression, constraints: &mut Vec<Constraint>) {
+    fn collect_expr(&mut self, expr: &HirExpression, line: usize, constraints: &mut Vec<Constraint>) {
         match &expr.kind {
             HirExprKind::Infix { left, operator, right } => {
-                self.collect_expr(left, constraints);
-                self.collect_expr(right, constraints);
+                self.collect_expr(left, line, constraints);
+                self.collect_expr(right, line, constraints);
                 // Both operands must have the same type
-                constraints.push(Constraint::new(left.ty.clone(), right.ty.clone(), 0));
+                constraints.push(Constraint::new(left.ty.clone(), right.ty.clone(), line));
                 // For comparison operators, result is bool
                 match operator.as_str() {
                     "==" | "!=" | "<" | ">" | "<=" | ">=" => {
-                        constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, 0));
+                        constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, line));
                     }
                     // For arithmetic, result type matches operand type
                     "+" | "-" | "*" | "/" | "%" => {
-                        constraints.push(Constraint::new(expr.ty.clone(), left.ty.clone(), 0));
+                        constraints.push(Constraint::new(expr.ty.clone(), left.ty.clone(), line));
                     }
                     // Logical operators
                     "&&" | "||" => {
-                        constraints.push(Constraint::new(left.ty.clone(), Type::Bool, 0));
-                        constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, 0));
+                        constraints.push(Constraint::new(left.ty.clone(), Type::Bool, line));
+                        constraints.push(Constraint::new(right.ty.clone(), Type::Bool, line));
+                        constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, line));
                     }
                     _ => {}
                 }
             }
             HirExprKind::Prefix { right, operator } => {
-                self.collect_expr(right, constraints);
+                self.collect_expr(right, line, constraints);
                 match operator.as_str() {
-                    "!" => constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, 0)),
-                    "-" => constraints.push(Constraint::new(expr.ty.clone(), right.ty.clone(), 0)),
+                    "!" => constraints.push(Constraint::new(expr.ty.clone(), Type::Bool, line)),
+                    "-" => constraints.push(Constraint::new(expr.ty.clone(), right.ty.clone(), line)),
+                    "&" => constraints.push(Constraint::new(expr.ty.clone(), Type::Ref(Box::new(right.ty.clone())), line)),
+                    "&mut" => constraints.push(Constraint::new(expr.ty.clone(), Type::MutRef(Box::new(right.ty.clone())), line)),
                     _ => {}
                 }
             }
             HirExprKind::Call { function, arguments } => {
-                self.collect_expr(function, constraints);
+                self.collect_expr(function, line, constraints);
                 for arg in arguments {
-                    self.collect_expr(arg, constraints);
+                    self.collect_expr(arg, line, constraints);
                 }
                 // Constrain: function type must be Fn([arg types...], return_type)
                 // and expr.ty must be the return type
                 let arg_types: Vec<Type> = arguments.iter().map(|a| a.ty.clone()).collect();
                 let expected_fn = Type::Fn(arg_types, Box::new(expr.ty.clone()));
-                constraints.push(Constraint::new(function.ty.clone(), expected_fn, 0));
+                constraints.push(Constraint::new(function.ty.clone(), expected_fn, line));
             }
             HirExprKind::If { condition, consequence, alternative } => {
-                self.collect_expr(condition, constraints);
-                constraints.push(Constraint::new(Type::Bool, condition.ty.clone(), 0));
+                self.collect_expr(condition, line, constraints);
+                constraints.push(Constraint::new(Type::Bool, condition.ty.clone(), line));
                 self.collect_stmt(consequence, constraints);
                 if let Some(alt) = alternative {
                     self.collect_stmt(alt, constraints);
                     // Both branches must have the same type
-                    constraints.push(Constraint::new(consequence.ty.clone(), alt.ty.clone(), 0));
+                    constraints.push(Constraint::new(consequence.ty.clone(), alt.ty.clone(), line));
                 }
             }
             HirExprKind::Assign { target, value } => {
-                self.collect_expr(target, constraints);
-                self.collect_expr(value, constraints);
-                constraints.push(Constraint::new(target.ty.clone(), value.ty.clone(), 0));
+                self.collect_expr(target, line, constraints);
+                self.collect_expr(value, line, constraints);
+                constraints.push(Constraint::new(target.ty.clone(), value.ty.clone(), line));
             }
             HirExprKind::Index { left, index } => {
-                self.collect_expr(left, constraints);
-                self.collect_expr(index, constraints);
+                self.collect_expr(left, line, constraints);
+                self.collect_expr(index, line, constraints);
                 // Index must be int
-                constraints.push(Constraint::new(index.ty.clone(), Type::Int, 0));
+                constraints.push(Constraint::new(index.ty.clone(), Type::Int, line));
                 // left must be Array<T> where T = expr.ty
-                constraints.push(Constraint::new(left.ty.clone(), Type::Array(Box::new(expr.ty.clone())), 0));
+                constraints.push(Constraint::new(left.ty.clone(), Type::Array(Box::new(expr.ty.clone())), line));
             }
             HirExprKind::ArrayLiteral(elems) => {
-                for e in elems { self.collect_expr(e, constraints); }
+                for e in elems { self.collect_expr(e, line, constraints); }
                 // All elements must have the same type
                 if elems.len() >= 2 {
                     let first = &elems[0].ty;
                     for e in &elems[1..] {
-                        constraints.push(Constraint::new(first.clone(), e.ty.clone(), 0));
+                        constraints.push(Constraint::new(first.clone(), e.ty.clone(), line));
                     }
                 }
             }
             HirExprKind::MapLiteral(pairs) => {
                 for (k, v) in pairs {
-                    self.collect_expr(k, constraints);
-                    self.collect_expr(v, constraints);
+                    self.collect_expr(k, line, constraints);
+                    self.collect_expr(v, line, constraints);
                 }
             }
             HirExprKind::MemberAccess { object, .. } => {
-                self.collect_expr(object, constraints);
+                self.collect_expr(object, line, constraints);
             }
             HirExprKind::Range { start, end } => {
-                self.collect_expr(start, constraints);
-                self.collect_expr(end, constraints);
-                constraints.push(Constraint::new(start.ty.clone(), Type::Int, 0));
-                constraints.push(Constraint::new(end.ty.clone(), Type::Int, 0));
+                self.collect_expr(start, line, constraints);
+                self.collect_expr(end, line, constraints);
+                constraints.push(Constraint::new(start.ty.clone(), Type::Int, line));
+                constraints.push(Constraint::new(end.ty.clone(), Type::Int, line));
             }
             HirExprKind::FunctionLiteral { body, .. } => {
                 self.collect_stmt(body, constraints);
@@ -262,6 +265,8 @@ impl TypeContext {
                 self.unify(k1, k2)?;
                 self.unify(v1, v2)
             }
+            (Type::Ref(a), Type::Ref(b)) => self.unify(a, b),
+            (Type::MutRef(a), Type::MutRef(b)) => self.unify(a, b),
 
             // Named types
             (Type::Named(n1), Type::Named(n2)) if n1 == n2 => Ok(()),
@@ -280,6 +285,8 @@ impl TypeContext {
             }
             Type::Array(inner) => self.occurs(var, inner),
             Type::Map(k, v) => self.occurs(var, k) || self.occurs(var, v),
+            Type::Ref(inner) => self.occurs(var, inner),
+            Type::MutRef(inner) => self.occurs(var, inner),
             _ => false,
         }
     }

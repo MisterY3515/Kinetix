@@ -1,6 +1,6 @@
 [package]
 name = "kinetix-installer"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 
 [[bin]]
@@ -12,6 +12,8 @@ eframe = "0.29.1"
 rfd = "0.14"
 directories = "5.0"
 image = { version = "0.24", default-features = false, features = ["png"] }
+ureq = { version = "2", features = ["native-tls"] }
+zip = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

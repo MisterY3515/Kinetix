@@ -25,6 +25,12 @@ pub enum Type {
     /// Map: Map<K, V>
     Map(Box<Type>, Box<Type>),
 
+    /// Immutable reference: &T
+    Ref(Box<Type>),
+
+    /// Mutable reference: &mut T
+    MutRef(Box<Type>),
+
     /// Unification variable (fresh, to be solved by HM)
     Var(TypeVarId),
 
@@ -50,6 +56,8 @@ impl fmt::Display for Type {
             }
             Type::Array(inner) => write!(f, "Array<{}>", inner),
             Type::Map(k, v) => write!(f, "Map<{}, {}>", k, v),
+            Type::Ref(inner) => write!(f, "&{}", inner),
+            Type::MutRef(inner) => write!(f, "&mut {}", inner),
             Type::Var(id) => write!(f, "?T{}", id),
             Type::Named(name) => write!(f, "{}", name),
         }
@@ -95,6 +103,8 @@ impl Substitution {
             }
             Type::Array(inner) => Type::Array(Box::new(self.apply(inner))),
             Type::Map(k, v) => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
+            Type::Ref(inner) => Type::Ref(Box::new(self.apply(inner))),
+            Type::MutRef(inner) => Type::MutRef(Box::new(self.apply(inner))),
             _ => ty.clone(),
         }
     }

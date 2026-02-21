@@ -1,9 +1,0 @@
-Active is true
-Counter: 
-5
- Sin: 
-0.9999999999932537
- Sqrt: 
-12
- Nested OK
- Phase 0 Test Complete

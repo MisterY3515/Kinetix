@@ -101,6 +101,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     // --- Variable Declaration ---
     fn parse_let_statement(&mut self, mutable: bool) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         match &self.peek_token {
             Token::Identifier(name) => {
                 let name = name.clone();
@@ -128,7 +129,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     self.next_token();
                 }
                 
-                Some(Statement::Let { name, mutable, type_hint, value, line: self.lexer.line })
+                Some(Statement::Let { name, mutable, type_hint, value, line: start_line })
             }
             _ => {
                 self.peek_error(Token::Identifier("name".to_string()));
@@ -139,6 +140,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     // --- Function Declaration (statement) ---
     fn parse_fn_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         // fn name(params) -> RetType { body }
         self.next_token(); // consume fn
         
@@ -166,7 +168,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                         body: self.arena.alloc(body),
                         return_type,
                     },
-                    line: self.lexer.line,
+                    line: start_line,
                 });
             }
             _ => return None,
@@ -196,11 +198,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             parameters: params,
             body: self.arena.alloc(body),
             return_type,
-            line: self.lexer.line,
+            line: start_line,
         })
     }
 
     fn parse_return_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         self.next_token(); 
         
         let value = if self.cur_token == Token::Semicolon || self.cur_token == Token::RBrace {
@@ -213,22 +216,24 @@ impl<'src, 'arena> Parser<'src, 'arena> {
              Some(expr)
         };
 
-        Some(Statement::Return { value, line: self.lexer.line })
+        Some(Statement::Return { value, line: start_line })
     }
     
     // --- While ---
     fn parse_while_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         self.next_token(); // consume 'while'
         let condition = self.parse_expression(Precedence::Lowest)?;
         
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
         
-        Some(Statement::While { condition, body: self.arena.alloc(body), line: self.lexer.line })
+        Some(Statement::While { condition, body: self.arena.alloc(body), line: start_line })
     }
     
     // --- For ---
     fn parse_for_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         self.next_token(); // consume 'for'
         
         let iterator = match &self.cur_token {
@@ -249,11 +254,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
         
-        Some(Statement::For { iterator, range, body: self.arena.alloc(body), line: self.lexer.line })
+        Some(Statement::For { iterator, range, body: self.arena.alloc(body), line: start_line })
     }
     
     // --- Include ---
     fn parse_include_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         // #include <system> as sys
         // #include "utils.nvr"
         self.next_token(); // consume #, now at Include
@@ -294,11 +300,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
         }
         
-        Some(Statement::Include { path, alias, line: self.lexer.line })
+        Some(Statement::Include { path, alias, line: start_line })
     }
     
     // --- Class ---
     fn parse_class_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         self.next_token(); // consume 'class'
         
         let name = match &self.cur_token {
@@ -381,11 +388,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             if self.cur_token == Token::Semicolon { self.next_token(); }
         }
         
-        Some(Statement::Class { name, parent, methods, fields, line: self.lexer.line })
+        Some(Statement::Class { name, parent, methods, fields, line: start_line })
     }
     
     // --- Struct ---
     fn parse_struct_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         self.next_token();
         let name = match &self.cur_token {
             Token::Identifier(name) => name.clone(),
@@ -414,17 +422,18 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             }
         }
         
-        Some(Statement::Struct { name, fields, line: self.lexer.line })
+        Some(Statement::Struct { name, fields, line: start_line })
     }
 
     fn parse_expression_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
         let expr = self.parse_expression(Precedence::Lowest)?;
         
         if self.peek_token == Token::Semicolon {
             self.next_token();
         }
         
-        Some(Statement::Expression { expression: expr, line: self.lexer.line })
+        Some(Statement::Expression { expression: expr, line: start_line })
     }
 
     // --- Expression Parsing ---
@@ -478,6 +487,16 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::Minus | Token::Bang => {
                 let op = if self.cur_token == Token::Minus { "-" } else { "!" }.to_string();
                 self.next_token();
+                let right = self.parse_expression(Precedence::Prefix)?;
+                Some(Expression::Prefix { operator: op, right: self.arena.alloc(right) })
+            },
+            Token::Ampersand => {
+                self.next_token();
+                let mut op = "&".to_string();
+                if self.cur_token == Token::Mut {
+                    op = "&mut".to_string();
+                    self.next_token();
+                }
                 let right = self.parse_expression(Precedence::Prefix)?;
                 Some(Expression::Prefix { operator: op, right: self.arena.alloc(right) })
             },

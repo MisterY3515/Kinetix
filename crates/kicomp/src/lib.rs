@@ -10,3 +10,5 @@ pub mod types;
 pub mod symbol;
 pub mod hir;
 pub mod typeck;
+pub mod mir;
+pub mod borrowck;

@@ -83,32 +83,141 @@ fn is_launched_from_explorer() -> bool {
 }
 
 fn fatal_error(msg: &str) {
+    // Auto-detect file from message: if first line looks like "path/to/file.kix:" extract it
+    let first_line = msg.lines().next().unwrap_or("");
+    let trimmed_first = first_line.trim();
+    if trimmed_first.ends_with(':')
+        && (trimmed_first.contains('/') || trimmed_first.contains('\\') || trimmed_first.contains(".kix"))
+    {
+        let file_path = &trimmed_first[..trimmed_first.len() - 1];
+        // Skip the first line (filename) from the message body
+        let rest = msg.lines().skip(1).collect::<Vec<_>>().join("\n");
+        fatal_error_in(Some(file_path), &rest);
+    } else {
+        fatal_error_in(None, msg);
+    }
+}
+
+fn fatal_error_in(file: Option<&str>, msg: &str) {
     let version = env!("CARGO_PKG_VERSION");
     let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
 
-    eprintln!("\n\x1b[31;1m[Kinetix v{} ({}) Fatal Error]\x1b[0m\n", version, build);
-    
-    // Structured error output with color coding
+    eprintln!();
+
+    // File header (if applicable)
+    if let Some(f) = file {
+        eprintln!("\x1b[1;37m{}:\x1b[0m", f);
+    }
+
+    // Structured error output — C++/Python-style diagnostics
     for line in msg.lines() {
-        if line.to_lowercase().contains("warning") {
-            eprintln!("  \x1b[33m{}\x1b[0m", line);
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            eprintln!();
+        } else if trimmed.starts_with("error") || trimmed.starts_with("Error")
+            || trimmed.contains("Fatal Error") || trimmed.contains("errors:")
+        {
+            eprintln!("\x1b[1;31merror\x1b[0m: {}", trimmed);
+        } else if trimmed.starts_with("warning") || trimmed.starts_with("Warning") {
+            eprintln!("\x1b[1;33mwarning\x1b[0m: {}", trimmed);
+        } else if trimmed.starts_with("note") || trimmed.starts_with("Note") {
+            eprintln!("\x1b[1;36mnote\x1b[0m: {}", trimmed);
+        } else if trimmed.starts_with("--> ") {
+            // Pre-formatted location reference
+            eprintln!("  \x1b[1;34m{}\x1b[0m", trimmed);
+        } else if trimmed.starts_with("- ") {
+            // Bullet item — likely an individual error
+            let detail = &trimmed[2..];
+            // Try to extract line number from "Line N:" pattern
+            if let Some(rest) = detail.strip_prefix("Line ") {
+                if let Some(colon_pos) = rest.find(':') {
+                    let line_no = &rest[..colon_pos];
+                    let msg_part = rest[colon_pos + 1..].trim();
+                    if let Some(f) = file {
+                        eprintln!("\x1b[1;31merror\x1b[0m: {}", msg_part);
+                        eprintln!("  \x1b[1;34m--> {}:{}\x1b[0m", f, line_no);
+                        
+                        if let Ok(line_num) = line_no.parse::<usize>() {
+                            if let Ok(source_content) = std::fs::read_to_string(f) {
+                                if let Some(source_line) = source_content.lines().nth(line_num.saturating_sub(1)) {
+                                    let trimmed_line = source_line.trim_start();
+                                    
+                                    // Try to find a target word in single quotes (e.g. 'math', 'a')
+                                    let mut target_word = None;
+                                    if let Some(start) = msg_part.find('\'') {
+                                        if let Some(end) = msg_part[start + 1..].find('\'') {
+                                            target_word = Some(&msg_part[start + 1 .. start + 1 + end]);
+                                        }
+                                    }
+
+                                    let mut indent = source_line.len() - trimmed_line.len();
+                                    let mut caret_len = trimmed_line.len().max(1);
+                                    
+                                    if let Some(word) = target_word {
+                                        if let Some(pos) = source_line.find(word) {
+                                            indent = pos;
+                                            caret_len = word.len();
+                                        }
+                                    }
+
+                                    eprintln!("   \x1b[1;34m|\x1b[0m");
+                                    eprintln!("\x1b[1;34m{:>2} |\x1b[0m {}", line_num, source_line);
+                                    let carets = "^".repeat(caret_len);
+                                    let spaces = " ".repeat(indent);
+                                    eprintln!("   \x1b[1;34m|\x1b[0m {}\x1b[1;31m{}\x1b[0m", spaces, carets);
+                                }
+                            }
+                        }
+                    } else {
+                        eprintln!("\x1b[1;31merror\x1b[0m: {}", msg_part);
+                        eprintln!("  \x1b[1;34m--> line {}\x1b[0m", line_no);
+                    }
+                } else {
+                    eprintln!("  {}", trimmed);
+                }
+            } else {
+                eprintln!("  {}", trimmed);
+            }
         } else {
             eprintln!("  {}", line);
         }
     }
-    
-    eprintln!("\n\x1b[36mIf you think this is a bug, please open an issue on the GitHub repository:\x1b[0m");
-    eprintln!("\x1b[4mhttps://github.com/MisterY3515/Kinetix/issues\x1b[0m\n");
-    
+
+    // Footer
+    eprintln!();
+    eprintln!("\x1b[1;31merror[E0000]\x1b[0m: aborting due to previous error(s)");
+    eprintln!("\x1b[2m  Kinetix v{} ({})\x1b[0m", version, build);
+    eprintln!("\x1b[36m  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues\x1b[0m");
+    eprintln!();
+
     #[cfg(target_os = "windows")]
     {
-        // If launched via double-click from Windows Explorer (no existing console),
-        // pause to prevent the window from disappearing silently.
         if is_launched_from_explorer() {
             let _ = std::process::Command::new("cmd.exe").arg("/c").arg("pause").status();
         }
     }
     std::process::exit(1);
+}
+
+/// Format a compile-pipeline error with filename context.
+fn format_pipeline_error(file: &std::path::Path, category: &str, errors: Vec<String>) -> String {
+    let fname = file.display().to_string();
+    let mut out = format!("{}:\n", fname);
+    for e in &errors {
+        // Check if error already contains "Line N:" pattern
+        let trimmed = e.trim();
+        if let Some(rest) = trimmed.strip_prefix("Line ") {
+            if let Some(colon_pos) = rest.find(':') {
+                let line_no = &rest[..colon_pos];
+                let msg = rest[colon_pos + 1..].trim();
+                out.push_str(&format!("- Line {}: {}\n", line_no, msg));
+                continue;
+            }
+        }
+        out.push_str(&format!("- {}\n", trimmed));
+    }
+    out.push_str(&format!("{} error(s) in {}", errors.len(), category));
+    out
 }
 
 fn main() {
@@ -209,10 +318,23 @@ fn run() -> Result<(), String> {
             let ast = parser.parse_program();
 
             if !parser.errors.is_empty() {
-                eprintln!("Parser errors:");
-                for e in &parser.errors { eprintln!("  - {}", e); }
-                return Err("Parsing failed".into());
+                let errs: Vec<String> = parser.errors.iter().map(|e| e.to_string()).collect();
+                return Err(format_pipeline_error(&file, "Parser", errs));
             }
+
+            let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
+                .map_err(|errs| format_pipeline_error(&file, "Symbol Resolution", errs))?;
+            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols);
+            let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
+            let constraints = ctx.collect_constraints(&hir);
+            ctx.solve(&constraints).map_err(|errs| {
+                let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                format_pipeline_error(&file, "Type Checker", msgs)
+            })?;
+            let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
+            kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
+                format_pipeline_error(&file, "Borrow Checker", errs)
+            })?;
 
             #[cfg(feature = "llvm")]
             {
@@ -251,10 +373,23 @@ fn run() -> Result<(), String> {
             let ast = parser.parse_program();
 
             if !parser.errors.is_empty() {
-                eprintln!("Parser errors:");
-                for e in &parser.errors { eprintln!("  - {}", e); }
-                return Err("Parsing failed".into());
+                let errs: Vec<String> = parser.errors.iter().map(|e| e.to_string()).collect();
+                return Err(format_pipeline_error(&input, "Parser", errs));
             }
+
+            let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
+                .map_err(|errs| format_pipeline_error(&input, "Symbol Resolution", errs))?;
+            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols);
+            let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
+            let constraints = ctx.collect_constraints(&hir);
+            ctx.solve(&constraints).map_err(|errs| {
+                let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                format_pipeline_error(&input, "Type Checker", msgs)
+            })?;
+            let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
+            kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
+                format_pipeline_error(&input, "Borrow Checker", errs)
+            })?;
 
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;

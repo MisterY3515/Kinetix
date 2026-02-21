@@ -134,8 +134,9 @@ pub enum HirExprKind {
 /// Unknown types are assigned fresh type variables for later unification.
 pub fn lower_to_hir<'a>(statements: &[Statement<'a>], symbols: &SymbolTable) -> HirProgram {
     let mut fresh = FreshCounter::new();
+    let mut env = std::collections::HashMap::new();
     let stmts = statements.iter()
-        .map(|s| lower_statement(s, symbols, &mut fresh))
+        .map(|s| lower_statement(s, symbols, &mut fresh, &mut env))
         .collect();
     HirProgram { statements: stmts }
 }
@@ -158,15 +159,17 @@ fn get_line(stmt: &Statement) -> usize {
     }
 }
 
-fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut FreshCounter) -> HirStatement {
+fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut FreshCounter, env: &mut std::collections::HashMap<String, Type>) -> HirStatement {
     let line = get_line(stmt);
     match stmt {
         Statement::Let { name, mutable, type_hint, value, .. } => {
-            let val = lower_expression(value, symbols, fresh);
+            let val = lower_expression(value, symbols, fresh, env);
             let ty = match type_hint {
                 Some(hint) => parse_type_hint(hint),
                 None => fresh.fresh(),
             };
+            // Register this variable in the type environment
+            env.insert(name.clone(), ty.clone());
             HirStatement {
                 kind: HirStmtKind::Let { name: name.clone(), mutable: *mutable, value: val },
                 ty,
@@ -174,7 +177,7 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut 
             }
         }
         Statement::Return { value, .. } => {
-            let val = value.as_ref().map(|v| lower_expression(v, symbols, fresh));
+            let val = value.as_ref().map(|v| lower_expression(v, symbols, fresh, env));
             let ty = match &val {
                 Some(e) => e.ty.clone(),
                 None => Type::Void,
@@ -182,13 +185,13 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut 
             HirStatement { kind: HirStmtKind::Return { value: val }, ty, line }
         }
         Statement::Expression { expression, .. } => {
-            let expr = lower_expression(expression, symbols, fresh);
+            let expr = lower_expression(expression, symbols, fresh, env);
             let ty = expr.ty.clone();
             HirStatement { kind: HirStmtKind::Expression { expression: expr }, ty, line }
         }
         Statement::Block { statements, .. } => {
             let stmts: Vec<HirStatement> = statements.iter()
-                .map(|s| lower_statement(s, symbols, fresh))
+                .map(|s| lower_statement(s, symbols, fresh, env))
                 .collect();
             let ty = stmts.last().map(|s| s.ty.clone()).unwrap_or(Type::Void);
             HirStatement { kind: HirStmtKind::Block { statements: stmts }, ty, line }
@@ -198,7 +201,14 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut 
                 .map(|(n, t)| (n.clone(), parse_type_hint(t)))
                 .collect();
             let ret = parse_type_hint(return_type);
-            let hir_body = Box::new(lower_statement(body, symbols, fresh));
+            
+            // Function scope clone to prevent leaking params into global
+            let mut func_env = env.clone();
+            for (p_name, p_ty) in &params {
+                func_env.insert(p_name.clone(), p_ty.clone());
+            }
+
+            let hir_body = Box::new(lower_statement(body, symbols, fresh, &mut func_env));
             HirStatement {
                 kind: HirStmtKind::Function { name: name.clone(), parameters: params, body: hir_body, return_type: ret.clone() },
                 ty: Type::Void, // function definitions don't produce a value
@@ -206,13 +216,18 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut 
             }
         }
         Statement::While { condition, body, .. } => {
-            let cond = lower_expression(condition, symbols, fresh);
-            let b = Box::new(lower_statement(body, symbols, fresh));
+            let cond = lower_expression(condition, symbols, fresh, env);
+            let b = Box::new(lower_statement(body, symbols, fresh, env));
             HirStatement { kind: HirStmtKind::While { condition: cond, body: b }, ty: Type::Void, line }
         }
         Statement::For { iterator, range, body, .. } => {
-            let r = lower_expression(range, symbols, fresh);
-            let b = Box::new(lower_statement(body, symbols, fresh));
+            let r = lower_expression(range, symbols, fresh, env);
+            
+            // Scope iter var
+            let mut for_env = env.clone();
+            for_env.insert(iterator.clone(), Type::Int); // Iterators over Ranges are Int
+            let b = Box::new(lower_statement(body, symbols, fresh, &mut for_env));
+            
             HirStatement {
                 kind: HirStmtKind::For { iterator: iterator.clone(), range: r, body: b },
                 ty: Type::Void, line,
@@ -225,7 +240,7 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, fresh: &mut 
     }
 }
 
-fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mut FreshCounter) -> HirExpression {
+fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mut FreshCounter, env: &mut std::collections::HashMap<String, Type>) -> HirExpression {
     match expr {
         Expression::Integer(v) => HirExpression { kind: HirExprKind::Integer(*v), ty: Type::Int },
         Expression::Float(v) => HirExpression { kind: HirExprKind::Float(*v), ty: Type::Float },
@@ -233,22 +248,38 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
         Expression::Boolean(v) => HirExpression { kind: HirExprKind::Boolean(*v), ty: Type::Bool },
         Expression::Null => HirExpression { kind: HirExprKind::Null, ty: Type::Void },
         Expression::Identifier(name) => {
-            let ty = symbols.resolve(name)
-                .map(|s| s.ty.clone())
-                .unwrap_or_else(|| fresh.fresh());
+            let ty = if name == "println" || name == "print" {
+                // println/print accept any argument, so we give them a fresh type variable parameter
+                Type::Fn(vec![fresh.fresh()], Box::new(Type::Void))
+            } else if let Some(t) = env.get(name) {
+                // Prefer the HIR-level type environment so unification uses the same type
+                // variable across all usages of a Let-defined variable.
+                t.clone()
+            } else if let Some(t) = symbols.resolve(name).map(|s| s.ty.clone()) {
+                // Fallback: builtins, functions, classes registered in the SymbolTable.
+                t
+            } else {
+                let fr = fresh.fresh();
+                env.insert(name.clone(), fr.clone());
+                fr
+            };
             HirExpression { kind: HirExprKind::Identifier(name.clone()), ty }
         }
         Expression::Prefix { operator, right } => {
-            let r = lower_expression(right, symbols, fresh);
-            let ty = r.ty.clone();
+            let r = lower_expression(right, symbols, fresh, env);
+            let ty = match operator.as_str() {
+                "&" => Type::Ref(Box::new(r.ty.clone())),
+                "&mut" => Type::MutRef(Box::new(r.ty.clone())),
+                _ => r.ty.clone(),
+            };
             HirExpression {
                 kind: HirExprKind::Prefix { operator: operator.clone(), right: Box::new(r) },
                 ty,
             }
         }
         Expression::Infix { left, operator, right } => {
-            let l = lower_expression(left, symbols, fresh);
-            let r = lower_expression(right, symbols, fresh);
+            let l = lower_expression(left, symbols, fresh, env);
+            let r = lower_expression(right, symbols, fresh, env);
             let ty = fresh.fresh(); // will be constrained later
             HirExpression {
                 kind: HirExprKind::Infix { left: Box::new(l), operator: operator.clone(), right: Box::new(r) },
@@ -256,9 +287,9 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
             }
         }
         Expression::If { condition, consequence, alternative } => {
-            let cond = lower_expression(condition, symbols, fresh);
-            let cons = lower_statement(consequence, symbols, fresh);
-            let alt = alternative.map(|a| Box::new(lower_statement(a, symbols, fresh)));
+            let cond = lower_expression(condition, symbols, fresh, env);
+            let cons = lower_statement(consequence, symbols, fresh, env);
+            let alt = alternative.as_ref().map(|a| Box::new(lower_statement(a, symbols, fresh, env)));
             let ty = cons.ty.clone();
             HirExpression {
                 kind: HirExprKind::If { condition: Box::new(cond), consequence: Box::new(cons), alternative: alt },
@@ -266,9 +297,9 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
             }
         }
         Expression::Call { function, arguments } => {
-            let func = lower_expression(function, symbols, fresh);
+            let func = lower_expression(function, symbols, fresh, env);
             let args: Vec<HirExpression> = arguments.iter()
-                .map(|a| lower_expression(a, symbols, fresh))
+                .map(|a| lower_expression(a, symbols, fresh, env))
                 .collect();
             let ty = fresh.fresh(); // return type inferred later
             HirExpression {
@@ -281,7 +312,13 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
                 .map(|(n, t)| (n.clone(), parse_type_hint(t)))
                 .collect();
             let ret = parse_type_hint(return_type);
-            let hir_body = lower_statement(body, symbols, fresh);
+            
+            let mut func_env = env.clone();
+            for (p_name, p_ty) in &params {
+                func_env.insert(p_name.clone(), p_ty.clone());
+            }
+
+            let hir_body = lower_statement(body, symbols, fresh, &mut func_env);
             let param_types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
             HirExpression {
                 kind: HirExprKind::FunctionLiteral { parameters: params, body: Box::new(hir_body), return_type: ret.clone() },
@@ -290,7 +327,7 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
         }
         Expression::ArrayLiteral(elems) => {
             let hir_elems: Vec<HirExpression> = elems.iter()
-                .map(|e| lower_expression(e, symbols, fresh))
+                .map(|e| lower_expression(e, symbols, fresh, env))
                 .collect();
             let elem_ty = hir_elems.first().map(|e| e.ty.clone()).unwrap_or_else(|| fresh.fresh());
             HirExpression {
@@ -300,7 +337,7 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
         }
         Expression::MapLiteral(pairs) => {
             let hir_pairs: Vec<(HirExpression, HirExpression)> = pairs.iter()
-                .map(|(k, v)| (lower_expression(k, symbols, fresh), lower_expression(v, symbols, fresh)))
+                .map(|(k, v)| (lower_expression(k, symbols, fresh, env), lower_expression(v, symbols, fresh, env)))
                 .collect();
             let (kt, vt) = hir_pairs.first()
                 .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
@@ -311,8 +348,8 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
             }
         }
         Expression::Index { left, index } => {
-            let l = lower_expression(left, symbols, fresh);
-            let i = lower_expression(index, symbols, fresh);
+            let l = lower_expression(left, symbols, fresh, env);
+            let i = lower_expression(index, symbols, fresh, env);
             let ty = fresh.fresh();
             HirExpression {
                 kind: HirExprKind::Index { left: Box::new(l), index: Box::new(i) },
@@ -320,16 +357,44 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
             }
         }
         Expression::MemberAccess { object, member } => {
-            let obj = lower_expression(object, symbols, fresh);
-            let ty = fresh.fresh();
+            let obj = lower_expression(object, symbols, fresh, env);
+            let mut ty = fresh.fresh();
+
+            // Intercept built-in standard library methods so Type Checker knows their signature
+            if let HirExprKind::Identifier(ref obj_name) = obj.kind {
+                match obj_name.as_str() {
+                    "math" => match member.as_str() {
+                        "sin" | "cos" | "tan" | "sqrt" | "abs" | "floor" | "ceil" | "round" 
+                        | "asin" | "acos" | "atan" | "log" | "log10" | "exp" => {
+                            ty = Type::Fn(vec![Type::Float], Box::new(Type::Float));
+                        }
+                        "pow" | "atan2" => {
+                            ty = Type::Fn(vec![Type::Float, Type::Float], Box::new(Type::Float));
+                        }
+                        _ => {}
+                    },
+                    "system" => match member.as_str() {
+                        "time" => ty = Type::Fn(vec![], Box::new(Type::Float)),
+                        "exit" => ty = Type::Fn(vec![Type::Int], Box::new(Type::Void)),
+                        _ => {}
+                    },
+                    "auth" => match member.as_str() {
+                        "login" => ty = Type::Fn(vec![Type::Str, Type::Str], Box::new(Type::Bool)),
+                        "role" => ty = Type::Fn(vec![], Box::new(Type::Str)),
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+
             HirExpression {
                 kind: HirExprKind::MemberAccess { object: Box::new(obj), member: member.clone() },
                 ty,
             }
         }
         Expression::Assign { target, value } => {
-            let t = lower_expression(target, symbols, fresh);
-            let v = lower_expression(value, symbols, fresh);
+            let t = lower_expression(target, symbols, fresh, env);
+            let v = lower_expression(value, symbols, fresh, env);
             let ty = v.ty.clone();
             HirExpression {
                 kind: HirExprKind::Assign { target: Box::new(t), value: Box::new(v) },
@@ -337,8 +402,8 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
             }
         }
         Expression::Range { start, end } => {
-            let s = lower_expression(start, symbols, fresh);
-            let e = lower_expression(end, symbols, fresh);
+            let s = lower_expression(start, symbols, fresh, env);
+            let e = lower_expression(end, symbols, fresh, env);
             HirExpression {
                 kind: HirExprKind::Range { start: Box::new(s), end: Box::new(e) },
                 ty: Type::Array(Box::new(Type::Int)), // ranges are int arrays

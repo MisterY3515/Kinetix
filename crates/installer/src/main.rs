@@ -378,34 +378,101 @@ impl InstallerApp {
         // Step 7: Install documentation
         step!("Install Documentation", {
             if self.install_docs {
-                // Copy docs from the embedded Documentation/ folder
-                let exe_dir = std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-                
                 let docs_dest = self.install_path.join("docs");
-                self.log(format!("Copying docs to {:?}", docs_dest));
+                self.log(format!("Creating docs directory at {:?}", docs_dest));
+                let _ = fs::remove_dir_all(&docs_dest); // Clear old docs
                 fs::create_dir_all(&docs_dest)?;
 
-                // Try to find docs next to the installer
-                if let Some(exe_parent) = &exe_dir {
-                    let docs_src = exe_parent.join("docs");
-                    if docs_src.exists() {
-                        self.log(format!("Found docs at {:?}", docs_src));
-                        copy_dir_recursive(&docs_src, &docs_dest)?;
-                    } else {
-                        // Also try parent/Documentation
-                        let docs_src2 = exe_parent.parent()
-                            .map(|p| p.join("Documentation"));
-                        if let Some(ref src2) = docs_src2 {
-                            if src2.exists() {
-                                self.log(format!("Found docs at {:?}", src2));
-                                copy_dir_recursive(src2, &docs_dest)?;
-                            } else {
-                                self.log("Warning: Documentation folder not found.");
-                            }
+                // Try GitHub download
+                let build_no = option_env!("KINETIX_BUILD").unwrap_or("10"); // Defaults to 10 if not set via cargo build
+                let url_tag = format!("https://github.com/MisterY3515/Kinetix-Documentation/archive/refs/tags/{}.zip", build_no);
+                let url_main = "https://github.com/MisterY3515/Kinetix-Documentation/archive/refs/heads/main.zip";
+
+                self.log(format!("Downloading docs for build {}...", build_no));
+                
+                let mut download_success = false;
+                
+                // Helper closure to download and extract
+                let download_and_extract = |url: &str| -> Result<(), Box<dyn std::error::Error>> {
+                    let response = ureq::get(url).call()?;
+                    let mut reader = response.into_reader();
+                    let mut zip_bytes = Vec::new();
+                    std::io::copy(&mut reader, &mut zip_bytes)?;
+                    
+                    let cursor = std::io::Cursor::new(zip_bytes);
+                    let mut archive = zip::ZipArchive::new(cursor)?;
+                    
+                    for i in 0..archive.len() {
+                        let mut file = archive.by_index(i)?;
+                        let outpath = match file.enclosed_name() {
+                            Some(path) => path.to_owned(),
+                            None => continue,
+                        };
+                        
+                        // The github zip puts everything in a root folder like "Kinetix-Documentation-10/"
+                        // We strip the first component.
+                        let components: Vec<_> = outpath.components().collect();
+                        if components.is_empty() { continue; }
+                        let stripped_path: PathBuf = components[1..].iter().collect();
+                        if stripped_path.as_os_str().is_empty() { continue; }
+                        
+                        let dest_path = docs_dest.join(stripped_path);
+                        
+                        if (*file.name()).ends_with('/') {
+                            fs::create_dir_all(&dest_path)?;
                         } else {
-                             self.log("Warning: Could not determine Documentation path.");
+                            if let Some(p) = dest_path.parent() {
+                                if !p.exists() {
+                                    fs::create_dir_all(p)?;
+                                }
+                            }
+                            let mut outfile = fs::File::create(&dest_path)?;
+                            std::io::copy(&mut file, &mut outfile)?;
+                        }
+                    }
+                    Ok(())
+                };
+
+                // Try tagged release
+                if let Err(_) = download_and_extract(&url_tag) {
+                    self.log(format!("Failed to download tag {}. Trying main branch...", build_no));
+                    if let Err(_) = download_and_extract(url_main) {
+                        self.log("Failed to download main branch.");
+                    } else {
+                        self.log("Successfully downloaded and extracted docs from main branch.");
+                        download_success = true;
+                    }
+                } else {
+                    self.log(format!("Successfully downloaded and extracted docs from tag {}.", build_no));
+                    download_success = true;
+                }
+
+                // Fallback to local
+                if !download_success {
+                    self.log("Falling back to local documentation...");
+                    let exe_dir = std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+                    
+                    if let Some(exe_parent) = &exe_dir {
+                        let docs_src = exe_parent.join("docs");
+                        if docs_src.exists() {
+                            self.log(format!("Found local docs at {:?}", docs_src));
+                            copy_dir_recursive(&docs_src, &docs_dest)?;
+                        } else {
+                            // Also try parent/Documentation
+                            let docs_src2 = exe_parent.parent()
+                                .map(|p| p.join("Documentation"));
+                            if let Some(ref src2) = docs_src2 {
+                                if src2.exists() {
+                                    self.log(format!("Found local docs at {:?}", src2));
+                                    copy_dir_recursive(src2, &docs_dest)?;
+                                } else {
+                                    self.log("Warning: Local documentation folder not found.");
+                                }
+                            } else {
+                                self.log("Warning: Could not determine local Documentation path.");
+                            }
                         }
                     }
                 }

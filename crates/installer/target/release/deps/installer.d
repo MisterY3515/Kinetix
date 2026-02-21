@@ -8,5 +8,5 @@ src\../../../target/release/kicomp.exe:
 src\../../../assets/logo/KiFile.png:
 src\../../../LICENSE:
 
-# env-dep:CARGO_PKG_VERSION=0.0.4
-# env-dep:KINETIX_BUILD=Build 9
+# env-dep:CARGO_PKG_VERSION=0.0.5
+# env-dep:KINETIX_BUILD=Build 10
