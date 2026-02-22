@@ -73,7 +73,7 @@ $dist = Join-Path $root "dist"
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 
-$installerSrc = Join-Path $root "crates\installer\target\release\installer.exe"
+$installerSrc = Join-Path $root "target\release\installer.exe"
 if (!(Test-Path $installerSrc)) {
     Write-Host "ERROR: installer.exe not found at $installerSrc" -ForegroundColor Red
     Read-Host "Press Enter to exit"
