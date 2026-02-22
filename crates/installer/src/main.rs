@@ -98,6 +98,10 @@ fn main() -> eframe::Result<()> {
         let _ = std::fs::write("crash_log.txt", format!("Panic at {}: {}\n", location, msg));
     }));
 
+    #[cfg(target_os = "linux")]
+    let icon: Option<egui::IconData> = None; // Avoid X11 MaximumRequestLengthExceeded crash with large icons
+    
+    #[cfg(not(target_os = "linux"))]
     let icon = match image::load_from_memory(ICON_BYTES) {
         Ok(image) => {
             let image = image.into_rgba8();
@@ -110,6 +114,14 @@ fn main() -> eframe::Result<()> {
         }
         Err(_) => None,
     };
+
+    // Force Wayland backend priority if available to prevent XWayland MaximumRequestLengthExceeded crashes
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WINIT_UNIX_BACKEND").is_err() {
+            unsafe { std::env::set_var("WINIT_UNIX_BACKEND", "wayland,x11"); }
+        }
+    }
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -333,7 +345,29 @@ impl InstallerApp {
                 }
             }
             #[cfg(target_os = "linux")]
-            create_desktop_entry(&self.install_path)?;
+            {
+                create_desktop_entry(&self.install_path)?;
+                // Register custom mimetypes dynamically via xdg
+                let mime_dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/mime/packages");
+                if std::fs::create_dir_all(&mime_dir).is_ok() {
+                    let mime_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-kinetix-bundle">
+    <comment>Kinetix Bundle</comment>
+    <glob pattern="*.exki"/>
+  </mime-type>
+  <mime-type type="text/x-kinetix-source">
+    <comment>Kinetix Source</comment>
+    <glob pattern="*.kix"/>
+    <glob pattern="*.ki"/>
+  </mime-type>
+</mime-info>"#;
+                    let _ = fs::write(mime_dir.join("kinetix.xml"), mime_xml);
+                    let _ = std::process::Command::new("update-mime-database").arg(mime_dir.parent().unwrap()).output();
+                }
+            }
+            #[cfg(target_os = "macos")]
+            create_macos_app_handler(&self.install_path, &bin_dir)?;
         });
 
         // Step 6: Terminal Profile
@@ -1106,16 +1140,18 @@ fn create_desktop_entry(install_path: &Path) -> std::io::Result<()> {
     let apps_dir = PathBuf::from(&home).join(".local/share/applications");
     fs::create_dir_all(&apps_dir)?;
     let icon_path = install_path.join("assets").join("KiFile.png");
+    
+    // Main App & exec runner
     fs::write(
         apps_dir.join("kinetix.desktop"),
         format!(
-            "[Desktop Entry]\nName=Kinetix\nComment=Kinetix Language Runtime\nExec={bin}/kivm exec %f\nIcon={icon}\nTerminal=true\nType=Application\nCategories=Development;\nMimeType=text/x-kinetix;\n",
+            "[Desktop Entry]\nName=Kinetix\nComment=Kinetix Language Runtime\nExec={bin}/kivm exec %f\nIcon={icon}\nTerminal=true\nType=Application\nCategories=Development;\nMimeType=text/x-kinetix;text/x-kinetix-source;application/x-kinetix-bundle;\n",
             bin = install_path.join("bin").display(),
             icon = icon_path.display()
         ),
     )?;
 
-    // Also create a shell entry for kivm shell
+    // Interactive Shell
     fs::write(
         apps_dir.join("kinetix-shell.desktop"),
         format!(
@@ -1124,6 +1160,83 @@ fn create_desktop_entry(install_path: &Path) -> std::io::Result<()> {
             icon = icon_path.display()
         ),
     )?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn create_macos_app_handler(install_path: &Path, bin_dir: &Path) -> std::io::Result<()> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let apps_dir = PathBuf::from(&home).join("Applications");
+    fs::create_dir_all(&apps_dir)?;
+    
+    let app_path = apps_dir.join("Kinetix.app");
+    fs::create_dir_all(app_path.join("Contents/MacOS"))?;
+    fs::create_dir_all(app_path.join("Contents/Resources"))?;
+    
+    // Copy icon
+    let icon_src = install_path.join("assets").join("KiFile.png");
+    let icon_dest = app_path.join("Contents/Resources/KiFile.icns");
+    // Ideally we'd convert png to icns, but just copying png works for many basic macOS setups 
+    // or at least doesn't crash if we provide it as CFBundleIconFile.
+    let _ = fs::copy(&icon_src, &icon_dest);
+    
+    // Create the launcher script
+    let launcher_path = app_path.join("Contents/MacOS/KinetixEnv");
+    fs::write(
+        &launcher_path,
+        format!(
+            "#!/bin/bash\nif [ -n \"$1\" ]; then\n  \"{bin}/kivm\" exec \"$1\"\nelse\n  \"{bin}/kivm\" shell\nfi\n",
+            bin = bin_dir.display()
+        )
+    )?;
+    set_executable(&launcher_path)?;
+    
+    // Create Info.plist with file associations
+    let plist_path = app_path.join("Contents/Info.plist");
+    let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>KinetixEnv</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.mistery3515.kinetix</string>
+    <key>CFBundleName</key>
+    <string>Kinetix</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>KiFile</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>kix</string>
+                <string>ki</string>
+                <string>exki</string>
+            </array>
+            <key>CFBundleTypeIconFile</key>
+            <string>KiFile</string>
+            <key>CFBundleTypeName</key>
+            <string>Kinetix Source File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+        </dict>
+    </array>
+</dict>
+</plist>"#;
+    fs::write(&plist_path, plist)?;
+    
+    // Refresh LaunchServices to pick up the new file types
+    let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister")
+        .arg("-f")
+        .arg(&app_path)
+        .output();
+        
     Ok(())
 }
 
