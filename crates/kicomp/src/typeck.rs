@@ -220,6 +220,11 @@ impl TypeContext {
                 errors.push(TypeError { message: msg, line: c.line });
             }
         }
+        // M2.5 Generic Instantiation Depth Limit (DOS protection)
+        if let Err(msg) = self.substitution.check_depth_limit(32) {
+            errors.push(TypeError { message: msg, line: 0 }); // Global error
+        }
+
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
@@ -314,7 +319,8 @@ mod tests {
         let program = parser.parse_program();
         assert!(parser.errors.is_empty(), "Parser errors: {:?}", parser.errors);
         let symbols = resolve_program(&program.statements).expect("Symbol resolution failed");
-        let hir = lower_to_hir(&program.statements, &symbols);
+        let traits = crate::trait_solver::TraitEnvironment::new();
+        let hir = lower_to_hir(&program.statements, &symbols, &traits);
         let mut ctx = TypeContext::new();
         let constraints = ctx.collect_constraints(&hir);
         ctx.solve(&constraints)?;

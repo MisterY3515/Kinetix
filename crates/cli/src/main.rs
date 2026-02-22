@@ -324,13 +324,35 @@ fn run() -> Result<(), String> {
 
             let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
                 .map_err(|errs| format_pipeline_error(&file, "Symbol Resolution", errs))?;
-            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols);
+
+            let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+            for stmt in &ast.statements {
+                if let kinetix_language::ast::Statement::Trait { .. } = stmt {
+                    if let Err(e) = traits.register_trait(stmt) {
+                        return Err(format_pipeline_error(&file, "Trait Resolver", vec![e]));
+                    }
+                }
+            }
+            for stmt in &ast.statements {
+                if let kinetix_language::ast::Statement::Impl { .. } = stmt {
+                    if let Err(e) = traits.register_impl(stmt) {
+                        return Err(format_pipeline_error(&file, "Trait Resolver", vec![e]));
+                    }
+                }
+            }
+            traits.validate_cycles().map_err(|e| format_pipeline_error(&file, "Trait Resolver", vec![e]))?;
+
+            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
                 let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
                 format_pipeline_error(&file, "Type Checker", msgs)
             })?;
+
+            kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
+                .map_err(|e| format_pipeline_error(&file, "Exhaustiveness Checker", vec![e]))?;
+
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&file, "Borrow Checker", errs)
@@ -379,13 +401,35 @@ fn run() -> Result<(), String> {
 
             let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
                 .map_err(|errs| format_pipeline_error(&input, "Symbol Resolution", errs))?;
-            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols);
+
+            let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+            for stmt in &ast.statements {
+                if let kinetix_language::ast::Statement::Trait { .. } = stmt {
+                    if let Err(e) = traits.register_trait(stmt) {
+                        return Err(format_pipeline_error(&input, "Trait Resolver", vec![e]));
+                    }
+                }
+            }
+            for stmt in &ast.statements {
+                if let kinetix_language::ast::Statement::Impl { .. } = stmt {
+                    if let Err(e) = traits.register_impl(stmt) {
+                        return Err(format_pipeline_error(&input, "Trait Resolver", vec![e]));
+                    }
+                }
+            }
+            traits.validate_cycles().map_err(|e| format_pipeline_error(&input, "Trait Resolver", vec![e]))?;
+
+            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
                 let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
                 format_pipeline_error(&input, "Type Checker", msgs)
             })?;
+
+            kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
+                .map_err(|e| format_pipeline_error(&input, "Exhaustiveness Checker", vec![e]))?;
+
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&input, "Borrow Checker", errs)

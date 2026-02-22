@@ -12,3 +12,5 @@ pub mod hir;
 pub mod typeck;
 pub mod mir;
 pub mod borrowck;
+pub mod trait_solver;
+pub mod exhaustiveness;

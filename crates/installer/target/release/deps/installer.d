@@ -9,4 +9,4 @@ src\../../../assets/logo/KiFile.png:
 src\../../../LICENSE:
 
 # env-dep:CARGO_PKG_VERSION=0.0.6
-# env-dep:KINETIX_BUILD=11
+# env-dep:KINETIX_BUILD=12

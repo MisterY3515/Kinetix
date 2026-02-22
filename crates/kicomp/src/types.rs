@@ -38,6 +38,26 @@ pub enum Type {
     Custom { name: String, args: Vec<Type> },
 }
 
+impl Type {
+    /// Recursively calculates the instantiation depth of this type.
+    /// Used for generic DOS protection (instantiation depth limits).
+    pub fn depth(&self) -> usize {
+        match self {
+            Type::Var(_) | Type::Int | Type::Float | Type::Bool | Type::Str | Type::Void => 1,
+            Type::Fn(params, ret) => {
+                let p_max = params.iter().map(|p| p.depth()).max().unwrap_or(0);
+                1 + p_max.max(ret.depth())
+            }
+            Type::Array(inner) | Type::Ref(inner) | Type::MutRef(inner) => 1 + inner.depth(),
+            Type::Map(k, v) => 1 + k.depth().max(v.depth()),
+            Type::Custom { args, .. } => {
+                let a_max = args.iter().map(|a| a.depth()).max().unwrap_or(0);
+                1 + a_max
+            }
+        }
+    }
+}
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -122,6 +142,17 @@ impl Substitution {
             }
             _ => ty.clone(), // Primitives (Int, Float, Bool, Str, Void)
         }
+    }
+
+    /// Enforces the generic DOS instantiation depth limit.
+    pub fn check_depth_limit(&self, max_depth: usize) -> Result<(), String> {
+        for ty in self.map.values() {
+            let resolved = self.apply(ty);
+            if resolved.depth() > max_depth {
+                return Err(format!("Generic Instantiation Depth Limit exceeded (depth = {}, max = {}): {}", resolved.depth(), max_depth, resolved));
+            }
+        }
+        Ok(())
     }
 }
 
