@@ -1,5 +1,5 @@
-use crate::mir::{MirProgram, MirFunction, BasicBlockData, StatementKind, TerminatorKind, RValue, Operand, Place, Mutability, LocalId};
-use std::collections::{HashMap, HashSet};
+use crate::mir::{MirProgram, MirFunction, StatementKind, TerminatorKind, RValue, Operand};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocalState {
@@ -64,7 +64,7 @@ impl BorrowChecker {
                     StatementKind::Expression(rvalue) => {
                         self.check_rvalue(rvalue, stmt.line, &func.locals, &mut states, errors);
                     }
-                    StatementKind::Drop(place) => {
+                    StatementKind::Drop(_place) => {
                         // Drop allows a Moved value (it's a no-op at runtime),
                         // but if we had strict linear checking, we'd ensure it wasn't uninitialized.
                     }

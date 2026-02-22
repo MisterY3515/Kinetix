@@ -1,0 +1,15 @@
+6a6b763 Build tag fixed
+2a9126c Minor fixes for add support to Linux and MacOS
+8a0b564 Build tag fixed
+78fc609 Minor fixes for add support to Linux and MacOS
+ab72766 Merge pull request #1 from MisterY3515/dev
+594c153 ADTs and Formal Exhaustiveness Matching
+2fc89ae 12.1
+eec1fb9 Type System Consolidation & Generic Infrastructure
+491dd08 Minor fix
+41ff08e Build 10
+48c6fa6 Add HIR, symbol table, and typechecker
+20b7ceb Add installer UI, Windows integration, and fixes
+4645b37 Add installer build artifacts, update CLI
+5f5c03a Add experimental LLVM native backend
+6e08937 Rebuild installer release artifacts
