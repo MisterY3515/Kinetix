@@ -117,4 +117,67 @@ impl TraitEnvironment {
         }
         None
     }
+
+    /// Detects cycles in trait definitions to prevent semantic DOS and infinite resolution loops.
+    pub fn validate_cycles(&self) -> Result<(), String> {
+        let mut visited = std::collections::HashSet::new();
+        let mut path = Vec::new();
+
+        for trait_name in self.traits.keys() {
+            if let Err(cycle) = self.check_trait_deps(trait_name, &mut visited, &mut path) {
+                return Err(format!("Trait Cycle Detected: {}", cycle));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_trait_deps(&self, current: &str, visited: &mut std::collections::HashSet<String>, path: &mut Vec<String>) -> Result<(), String> {
+        if path.iter().any(|p| p == current) {
+            path.push(current.to_string());
+            return Err(path.join(" -> "));
+        }
+        if visited.contains(current) {
+            return Ok(());
+        }
+        path.push(current.to_string());
+        visited.insert(current.to_string());
+
+        if let Some(t_def) = self.traits.get(current) {
+            for method in &t_def.methods {
+                for param in &method.params {
+                    self.trace_type_deps(param, visited, path)?;
+                }
+                self.trace_type_deps(&method.return_ty, visited, path)?;
+            }
+        }
+
+        path.pop();
+        Ok(())
+    }
+
+    fn trace_type_deps(&self, ty: &Type, visited: &mut std::collections::HashSet<String>, path: &mut Vec<String>) -> Result<(), String> {
+        match ty {
+            Type::Custom { name, args } => {
+                if self.traits.contains_key(name) {
+                    self.check_trait_deps(name, visited, path)?;
+                }
+                for arg in args {
+                    self.trace_type_deps(arg, visited, path)?;
+                }
+            }
+            Type::Array(inner) | Type::Ref(inner) | Type::MutRef(inner) => self.trace_type_deps(inner, visited, path)?,
+            Type::Fn(params, ret) => {
+                for p in params {
+                    self.trace_type_deps(p, visited, path)?;
+                }
+                self.trace_type_deps(ret, visited, path)?;
+            }
+            Type::Map(k, v) => {
+                self.trace_type_deps(k, visited, path)?;
+                self.trace_type_deps(v, visited, path)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
