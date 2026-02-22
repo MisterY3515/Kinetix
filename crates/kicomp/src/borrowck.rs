@@ -155,7 +155,8 @@ mod tests {
         let mut parser = Parser::new(lexer, &arena);
         let program = parser.parse_program();
         let symbols = resolve_program(&program.statements).unwrap();
-        let hir = lower_to_hir(&program.statements, &symbols);
+        let traits = crate::trait_solver::TraitEnvironment::new();
+        let hir = lower_to_hir(&program.statements, &symbols, &traits);
         let mut ctx = TypeContext::new();
         let constraints = ctx.collect_constraints(&hir);
         ctx.solve(&constraints).unwrap();
