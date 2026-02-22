@@ -1,6 +1,10 @@
 #!/bin/bash
 # Build script for Linux
 set -e
+export KINETIX_BUILD="13"
+
+# Ensure we are running from the workspace root
+cd "$(dirname "$0")/.."
 
 echo "=== Building Kinetix for Linux ==="
 
@@ -8,25 +12,16 @@ echo "=== Building Kinetix for Linux ==="
 echo "[1/2] Compiling..."
 cargo build --release --package kinetix-cli --package kinetix-kicomp
 
-# 2. Create distribution
-echo "[2/2] Creating dist..."
+# 2. Build the GUI Installer
+echo "[2/2] Building GUI Installer and Creating dist..."
+# The installer uses include_bytes! to embed kivm and kicomp from target/release/
+cargo build --release --package kinetix-installer
+
 rm -rf dist
-mkdir -p dist/bin
+mkdir -p dist
 
-# Copy binaries
-cp target/release/kivm dist/bin/kivm
-cp target/release/kicomp dist/bin/kicomp
-
-# Create convenience script/symlink
-ln -sf ./bin/kivm dist/kinetix
-
-# Optional: Create .desktop file or similar if needed for GUI apps (Installer is GUI)
-# But standard distribution is CLI tools usually.
-# If building the installer:
-# cargo build --release --package kinetix-installer
-# cp target/release/installer dist/install_kinetix
+cp target/release/installer dist/KinetixInstaller
 
 echo "=== Done ==="
 echo "Output: dist/"
-echo "  bin/kivm"
-echo "  bin/kicomp"
+echo "  KinetixInstaller"
