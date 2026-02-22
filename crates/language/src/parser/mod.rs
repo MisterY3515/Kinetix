@@ -65,6 +65,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::For => self.parse_for_statement(),
             Token::Class => self.parse_class_statement(),
             Token::Struct => self.parse_struct_statement(),
+            Token::Enum => self.parse_enum_statement(),
+            Token::Trait => self.parse_trait_statement(),
+            Token::Impl => self.parse_impl_statement(),
             Token::Hash => self.parse_hash_directive(),
             Token::Break => Some(Statement::Break { line: self.lexer.line }),
             Token::Continue => Some(Statement::Continue { line: self.lexer.line }),
@@ -425,6 +428,179 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         Some(Statement::Struct { name, fields, line: start_line })
     }
 
+    fn parse_generics(&mut self) -> Vec<String> {
+        let mut generics = vec![];
+        if self.cur_token == Token::Less {
+            self.next_token();
+            while self.cur_token != Token::Greater && self.cur_token != Token::EOF {
+                if let Token::Identifier(id) = &self.cur_token {
+                    generics.push(id.clone());
+                    self.next_token();
+                }
+                if self.cur_token == Token::Comma {
+                    self.next_token();
+                }
+            }
+            if self.cur_token == Token::Greater {
+                self.next_token();
+            }
+        }
+        generics
+    }
+
+    // --- Enum ---
+    fn parse_enum_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        self.next_token(); // consume 'enum'
+        let name = match &self.cur_token {
+            Token::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        self.next_token();
+        let generics = self.parse_generics();
+        
+        if self.cur_token != Token::LBrace { return None; }
+        self.next_token();
+        
+        let mut variants = vec![];
+        while self.cur_token != Token::RBrace && self.cur_token != Token::EOF {
+            if let Token::Identifier(vname) = &self.cur_token {
+                let v = vname.clone();
+                self.next_token();
+                let mut payload = None;
+                if self.cur_token == Token::LParen {
+                    self.next_token();
+                    if let Token::Identifier(ty) = &self.cur_token {
+                        payload = Some(ty.clone());
+                        self.next_token();
+                    }
+                    if self.cur_token == Token::RParen {
+                        self.next_token();
+                    }
+                }
+                variants.push((v, payload));
+                if self.cur_token == Token::Comma {
+                    self.next_token();
+                }
+            } else {
+                self.next_token();
+            }
+        }
+        if self.cur_token == Token::RBrace { self.next_token(); }
+        
+        Some(Statement::Enum { name, generics, variants, line: start_line })
+    }
+
+    // --- Trait ---
+    fn parse_trait_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        self.next_token(); // consume 'trait'
+        let name = match &self.cur_token {
+            Token::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        self.next_token();
+        let generics = self.parse_generics();
+        
+        if self.cur_token != Token::LBrace { return None; }
+        self.next_token();
+        
+        let mut methods = vec![];
+        while self.cur_token != Token::RBrace && self.cur_token != Token::EOF {
+            if self.cur_token == Token::Fn {
+                self.next_token();
+                if let Token::Identifier(mname) = &self.cur_token {
+                    let m = mname.clone();
+                    self.next_token();
+                    
+                    let mut params = vec![];
+                    if self.cur_token == Token::LParen {
+                        self.next_token();
+                        while self.cur_token != Token::RParen && self.cur_token != Token::EOF {
+                            if let Token::Identifier(pname) = &self.cur_token {
+                                let pn = pname.clone();
+                                self.next_token();
+                                if self.cur_token == Token::Colon {
+                                    self.next_token();
+                                    if let Token::Identifier(pty) = &self.cur_token {
+                                        params.push((pn, pty.clone()));
+                                        self.next_token();
+                                    }
+                                }
+                            }
+                            if self.cur_token == Token::Comma { self.next_token(); }
+                        }
+                        if self.cur_token == Token::RParen { self.next_token(); }
+                    }
+                    
+                    let mut ret_ty = "void".to_string();
+                    if self.cur_token == Token::Arrow {
+                        self.next_token();
+                        if let Token::Identifier(rty) = &self.cur_token {
+                            ret_ty = rty.clone();
+                            self.next_token();
+                        }
+                    }
+                    
+                    if self.cur_token == Token::Semicolon { self.next_token(); }
+                    
+                    methods.push((m, params, ret_ty));
+                }
+            } else {
+                self.next_token();
+            }
+        }
+        if self.cur_token == Token::RBrace { self.next_token(); }
+        
+        Some(Statement::Trait { name, generics, methods, line: start_line })
+    }
+
+    // --- Impl ---
+    fn parse_impl_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        self.next_token(); // consume 'impl'
+        
+        let generics = self.parse_generics();
+        
+        let first_name = match &self.cur_token {
+            Token::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        self.next_token();
+        
+        let mut trait_name = None;
+        let mut target_name = first_name.clone();
+        
+        // Check for 'for' e.g. impl Trait for Struct
+        if self.cur_token == Token::For {
+            self.next_token();
+            trait_name = Some(first_name);
+            if let Token::Identifier(t) = &self.cur_token {
+                target_name = t.clone();
+                self.next_token();
+            } else {
+                return None;
+            }
+        }
+        
+        if self.cur_token != Token::LBrace { return None; }
+        self.next_token();
+        
+        let mut methods = vec![];
+        while self.cur_token != Token::RBrace && self.cur_token != Token::EOF {
+            if self.cur_token == Token::Fn {
+                if let Some(stmt) = self.parse_fn_statement() {
+                    methods.push(stmt);
+                }
+            } else {
+                self.next_token();
+            }
+        }
+        if self.cur_token == Token::RBrace { self.next_token(); }
+        
+        Some(Statement::Impl { trait_name, target_name, generics, methods, line: start_line })
+    }
+
     fn parse_expression_statement(&mut self) -> Option<Statement<'arena>> {
         let start_line = self.lexer.line;
         let expr = self.parse_expression(Precedence::Lowest)?;
@@ -507,6 +683,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 Some(expr)
             },
             Token::If => self.parse_if_expression(),
+            Token::Match => self.parse_match_expression(),
             Token::Fn => self.parse_function_literal(), 
             Token::LBracket => self.parse_array_literal(),
             _ => {
@@ -520,6 +697,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         match &self.cur_token {
             Token::LParen => return self.parse_call_expression(left),
             Token::LBracket => return self.parse_index_expression(left),
+            Token::QuestionMark => {
+                self.next_token();
+                let node = Expression::Try { value: self.arena.alloc(left) };
+                return Some(node);
+            },
             Token::Dot => {
                 self.next_token();
                 if let Token::Identifier(member) = &self.cur_token {
@@ -639,6 +821,36 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             alternative: alternative.map(|a| &*self.arena.alloc(a)),
         })
     }
+
+    fn parse_match_expression(&mut self) -> Option<Expression<'arena>> {
+        self.next_token(); // Skip 'match'
+        let value = self.parse_expression(Precedence::Lowest)?;
+        
+        if !self.expect_peek(Token::LBrace) { return None; }
+        self.next_token(); // now inside block
+        
+        let mut arms = vec![];
+        while self.cur_token != Token::RBrace && self.cur_token != Token::EOF {
+            let pattern = self.parse_expression(Precedence::Lowest)?;
+            if !self.expect_peek(Token::FatArrow) { return None; }
+            self.next_token(); // advance to start of expression/statement
+            
+            let stmt = self.parse_statement()?;
+            arms.push((pattern, self.arena.alloc(stmt) as &'arena Statement<'arena>));
+            
+            self.next_token(); // advance past last token of stmt 
+            
+            // if we are at a comma, consume it
+            if self.cur_token == Token::Comma {
+                self.next_token();
+            }
+        }
+        
+        Some(Expression::Match {
+            value: self.arena.alloc(value),
+            arms,
+        })
+    }
     
     fn parse_block_statement(&mut self) -> Option<Statement<'arena>> {
         let mut statements = vec![];
@@ -732,6 +944,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::LBracket => Precedence::Index,
             Token::Dot => Precedence::Member,
             Token::DotDot => Precedence::Sum, // Range has Sum-level precedence
+            Token::QuestionMark => Precedence::Member,
             _ => Precedence::Lowest,
         }
     }

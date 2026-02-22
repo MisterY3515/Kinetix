@@ -89,10 +89,26 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
     // Register built-in modules in the global scope
     let builtins = ["math", "system", "data", "graph", "net", "crypto", "audio"];
     for b in builtins {
-        table.define(b, Type::Named(b.to_string()), false);
+        table.define(b, Type::Custom { name: b.to_string(), args: vec![] }, false);
     }
-    table.define("println", Type::Fn(vec![], Box::new(Type::Void)), false);
-    table.define("print", Type::Fn(vec![], Box::new(Type::Void)), false);
+    table.define("println", Type::Fn(vec![Type::Var(0)], Box::new(Type::Void)), false);
+    table.define("print", Type::Fn(vec![Type::Var(0)], Box::new(Type::Void)), false);
+
+    // M2 Builtins
+    let t = Type::Var(1); // Generic T
+    let e = Type::Var(2); // Generic E
+    
+    // Option<T>
+    let option_t = Type::Custom { name: "Option".to_string(), args: vec![t.clone()] };
+    table.define("Option", option_t.clone(), false);
+    table.define("Some", Type::Fn(vec![t.clone()], Box::new(option_t.clone())), false);
+    table.define("None", option_t.clone(), false); // Note: None in Rust is highly polymorphic, keeping it simple for now
+
+    // Result<T,E>
+    let result_t = Type::Custom { name: "Result".to_string(), args: vec![t.clone(), e.clone()] };
+    table.define("Result", result_t.clone(), false);
+    table.define("Ok", Type::Fn(vec![t.clone()], Box::new(result_t.clone())), false);
+    table.define("Err", Type::Fn(vec![e.clone()], Box::new(result_t.clone())), false);
 
     // First pass: register all top-level function and type definitions
     for stmt in statements {
@@ -105,10 +121,13 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
                 table.define(name, Type::Fn(param_types, Box::new(ret)), false);
             }
             Statement::Class { name, .. } => {
-                table.define(name, Type::Named(name.clone()), false);
+                table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
             }
             Statement::Struct { name, .. } => {
-                table.define(name, Type::Named(name.clone()), false);
+                table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
+            }
+            Statement::Enum { name, .. } => {
+                table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
             }
             _ => {}
         }
@@ -137,6 +156,9 @@ fn resolve_statement<'a>(stmt: &Statement<'a>, table: &mut SymbolTable, errors: 
         Statement::For { line, .. } => *line,
         Statement::Class { line, .. } => *line,
         Statement::Struct { line, .. } => *line,
+        Statement::Enum { line, .. } => *line,
+        Statement::Trait { line, .. } => *line,
+        Statement::Impl { line, .. } => *line,
         Statement::Include { line, .. } => *line,
         Statement::Version { line, .. } => *line,
         Statement::Break { line } => *line,
@@ -205,6 +227,9 @@ fn resolve_expression<'a>(expr: &Expression<'a>, table: &mut SymbolTable, errors
         }
         Expression::Prefix { right, .. } => {
             resolve_expression(right, table, errors, line);
+        }
+        Expression::Try { value } => {
+            resolve_expression(value, table, errors, line);
         }
         Expression::Infix { left, right, .. } => {
             resolve_expression(left, table, errors, line);

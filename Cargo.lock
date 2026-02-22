@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-cli"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bumpalo",
  "clap",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kicomp"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bumpalo",
  "clap",
@@ -1049,7 +1049,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kivm"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "csv",
  "hex",
@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-language"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bumpalo",
  "clap",

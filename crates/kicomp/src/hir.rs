@@ -77,6 +77,19 @@ pub struct HirExpression {
     pub ty: Type,
 }
 
+/// Pattern representation for match arms.
+#[derive(Debug, Clone)]
+pub enum HirPattern {
+    /// A literal value: 1, "hello", true
+    Literal(HirExpression),
+    /// A variant constructor with optional binding: Some(x), None, Ok(val)
+    Variant { name: String, binding: Option<String> },
+    /// Wildcard: _
+    Wildcard,
+    /// Simple identifier binding (catches everything and binds to name)
+    Binding(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum HirExprKind {
     Identifier(String),
@@ -126,6 +139,10 @@ pub enum HirExprKind {
         start: Box<HirExpression>,
         end: Box<HirExpression>,
     },
+    Match {
+        value: Box<HirExpression>,
+        arms: Vec<(HirPattern, HirStatement)>,
+    },
 }
 
 // ──────────────────── AST → HIR Lowering ────────────────────
@@ -152,6 +169,9 @@ fn get_line(stmt: &Statement) -> usize {
         Statement::For { line, .. } => *line,
         Statement::Class { line, .. } => *line,
         Statement::Struct { line, .. } => *line,
+        Statement::Enum { line, .. } => *line,
+        Statement::Trait { line, .. } => *line,
+        Statement::Impl { line, .. } => *line,
         Statement::Include { line, .. } => *line,
         Statement::Version { line, .. } => *line,
         Statement::Break { line } => *line,
@@ -247,6 +267,80 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, fresh: &mu
         Expression::String(v) => HirExpression { kind: HirExprKind::String(v.clone()), ty: Type::Str },
         Expression::Boolean(v) => HirExpression { kind: HirExprKind::Boolean(*v), ty: Type::Bool },
         Expression::Null => HirExpression { kind: HirExprKind::Null, ty: Type::Void },
+        Expression::Try { value } => {
+            // Desugar `expr?` into:
+            //   match expr { Ok(v) => v, Err(e) => return Err(e) }
+            let inner = lower_expression(value, symbols, fresh, env);
+            let result_ty = fresh.fresh(); // T in Result<T,E>
+            let err_ty = fresh.fresh();    // E in Result<T,E>
+            
+            let ok_arm = (
+                HirPattern::Variant { name: "Ok".to_string(), binding: Some("__ok_val".to_string()) },
+                HirStatement {
+                    kind: HirStmtKind::Expression {
+                        expression: HirExpression { kind: HirExprKind::Identifier("__ok_val".to_string()), ty: result_ty.clone() },
+                    },
+                    ty: result_ty.clone(),
+                    line: 0,
+                },
+            );
+            let err_arm = (
+                HirPattern::Variant { name: "Err".to_string(), binding: Some("__err_val".to_string()) },
+                HirStatement {
+                    kind: HirStmtKind::Return {
+                        value: Some(HirExpression {
+                            kind: HirExprKind::Call {
+                                function: Box::new(HirExpression { kind: HirExprKind::Identifier("Err".to_string()), ty: fresh.fresh() }),
+                                arguments: vec![HirExpression { kind: HirExprKind::Identifier("__err_val".to_string()), ty: err_ty.clone() }],
+                            },
+                            ty: fresh.fresh(),
+                        }),
+                    },
+                    ty: Type::Void,
+                    line: 0,
+                },
+            );
+            HirExpression {
+                kind: HirExprKind::Match {
+                    value: Box::new(inner),
+                    arms: vec![ok_arm, err_arm],
+                },
+                ty: result_ty,
+            }
+        }
+        Expression::Match { value, arms } => {
+            let val = lower_expression(value, symbols, fresh, env);
+            let match_ty = fresh.fresh();
+            let hir_arms: Vec<(HirPattern, HirStatement)> = arms.iter().map(|(pat_expr, body_stmt)| {
+                // Determine the pattern from the expression
+                let pattern = match pat_expr {
+                    Expression::Identifier(name) if name == "_" => HirPattern::Wildcard,
+                    Expression::Identifier(name) => HirPattern::Binding(name.clone()),
+                    Expression::Call { function, arguments } => {
+                        // e.g. Some(x) => Variant { name: "Some", binding: Some("x") }
+                        if let Expression::Identifier(vname) = *function {
+                            let binding = arguments.first().and_then(|a| {
+                                if let Expression::Identifier(b) = a { Some(b.clone()) } else { None }
+                            });
+                            HirPattern::Variant { name: vname.clone(), binding }
+                        } else {
+                            HirPattern::Wildcard
+                        }
+                    }
+                    _ => {
+                        // Literal patterns (integer, string, bool, etc.)
+                        let lit = lower_expression(pat_expr, symbols, fresh, env);
+                        HirPattern::Literal(lit)
+                    }
+                };
+                let body = lower_statement(body_stmt, symbols, fresh, env);
+                (pattern, body)
+            }).collect();
+            HirExpression {
+                kind: HirExprKind::Match { value: Box::new(val), arms: hir_arms },
+                ty: match_ty,
+            }
+        }
         Expression::Identifier(name) => {
             let ty = if name == "println" || name == "print" {
                 // println/print accept any argument, so we give them a fresh type variable parameter

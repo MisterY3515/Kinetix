@@ -34,8 +34,8 @@ pub enum Type {
     /// Unification variable (fresh, to be solved by HM)
     Var(TypeVarId),
 
-    /// Named / user-defined type (class, struct, trait — resolved later)
-    Named(String),
+    /// Named / user-defined type (class, struct, trait — resolved later), with optional generic args
+    Custom { name: String, args: Vec<Type> },
 }
 
 impl fmt::Display for Type {
@@ -59,7 +59,18 @@ impl fmt::Display for Type {
             Type::Ref(inner) => write!(f, "&{}", inner),
             Type::MutRef(inner) => write!(f, "&mut {}", inner),
             Type::Var(id) => write!(f, "?T{}", id),
-            Type::Named(name) => write!(f, "{}", name),
+            Type::Custom { name, args } => {
+                write!(f, "{}", name)?;
+                if !args.is_empty() {
+                    write!(f, "<")?;
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 { write!(f, ", ")?; }
+                        write!(f, "{}", arg)?;
+                    }
+                    write!(f, ">")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -105,7 +116,11 @@ impl Substitution {
             Type::Map(k, v) => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
             Type::Ref(inner) => Type::Ref(Box::new(self.apply(inner))),
             Type::MutRef(inner) => Type::MutRef(Box::new(self.apply(inner))),
-            _ => ty.clone(),
+            Type::Custom { name, args } => {
+                let mapped_args = args.iter().map(|a| self.apply(a)).collect();
+                Type::Custom { name: name.clone(), args: mapped_args }
+            }
+            _ => ty.clone(), // Primitives (Int, Float, Bool, Str, Void)
         }
     }
 }
@@ -117,9 +132,20 @@ pub fn parse_type_hint(hint: &str) -> Type {
         "float" => Type::Float,
         "bool" => Type::Bool,
         "str" | "string" => Type::Str,
-        "void" => Type::Void,
-        "" => Type::Void, // default return type
-        other => Type::Named(other.to_string()),
+        "void" | "" => Type::Void, // default return type
+        other => {
+            // Very naive generic type hint parsing for AST string hints like "Option<int>"
+            if let Some(start) = other.find('<') {
+                if other.ends_with('>') {
+                    let name = other[..start].to_string();
+                    let inner_str = &other[start+1..other.len()-1];
+                    // Handle single generic argument for now in type hints
+                    let inner_ty = if inner_str.is_empty() { vec![] } else { vec![parse_type_hint(inner_str.trim())] };
+                    return Type::Custom { name, args: inner_ty };
+                }
+            }
+            Type::Custom { name: other.to_string(), args: vec![] }
+        }
     }
 }
 
@@ -161,6 +187,7 @@ mod tests {
         assert_eq!(parse_type_hint("string"), Type::Str);
         assert_eq!(parse_type_hint("void"), Type::Void);
         assert_eq!(parse_type_hint(""), Type::Void);
-        assert_eq!(parse_type_hint("MyClass"), Type::Named("MyClass".to_string()));
+        assert_eq!(parse_type_hint("MyClass"), Type::Custom { name: "MyClass".to_string(), args: vec![] });
+        assert_eq!(parse_type_hint("Option<int>"), Type::Custom { name: "Option".to_string(), args: vec![Type::Int] });
     }
 }

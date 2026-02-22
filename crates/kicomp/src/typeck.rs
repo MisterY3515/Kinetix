@@ -268,8 +268,14 @@ impl TypeContext {
             (Type::Ref(a), Type::Ref(b)) => self.unify(a, b),
             (Type::MutRef(a), Type::MutRef(b)) => self.unify(a, b),
 
-            // Named types
-            (Type::Named(n1), Type::Named(n2)) if n1 == n2 => Ok(()),
+
+            // Custom types (named + generic args)
+            (Type::Custom { name: n1, args: a1 }, Type::Custom { name: n2, args: a2 }) if n1 == n2 && a1.len() == a2.len() => {
+                for (arg1, arg2) in a1.iter().zip(a2.iter()) {
+                    self.unify(arg1, arg2)?;
+                }
+                Ok(())
+            }
 
             // Mismatch
             _ => Err(format!("Type mismatch: {} vs {}", a, b)),

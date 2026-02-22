@@ -239,6 +239,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     fn compile_expression(&mut self, expr: &Expression) -> Result<BasicValueEnum<'ctx>, String> {
         match expr {
+            Expression::Try { value } => self.compile_expression(value), // TEMPORARY stub
             Expression::Integer(i) => Ok(self.context.i64_type().const_int(*i as u64, false).into()),
             Expression::Float(f) => Ok(self.context.f64_type().const_float(*f).into()),
             Expression::Boolean(b) => Ok(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),

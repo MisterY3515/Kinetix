@@ -13,6 +13,9 @@ pub enum Token {
     In,
     Class,
     Struct,
+    Enum,
+    Trait,
+    Impl,
     Import,
     Include,
     Pub,
@@ -63,6 +66,7 @@ pub enum Token {
     Arrow,    // ->
     FatArrow, // =>
     Hash,     // #
+    QuestionMark, // ?
     
     EOF,
     Illegal,
@@ -179,6 +183,7 @@ impl<'a> Lexer<'a> {
                     Token::Dot
                 }
             },
+            Some('?') => Token::QuestionMark,
             Some('(') => Token::LParen,
             Some(')') => Token::RParen,
             Some('{') => Token::LBrace,
@@ -244,6 +249,9 @@ impl<'a> Lexer<'a> {
                         "in" => Token::In,
                         "class" => Token::Class,
                         "struct" => Token::Struct,
+                        "enum" => Token::Enum,
+                        "trait" => Token::Trait,
+                        "impl" => Token::Impl,
                         "import" => Token::Import,
                         "include" => Token::Include,
                         "pub" => Token::Pub,
@@ -364,7 +372,7 @@ let result = add(five, ten);
     
     #[test]
     fn test_keywords() {
-        let input = "let mut fn return if else while for in class struct import include pub true false null break continue as match";
+        let input = "let mut fn return if else while for in class struct enum trait impl import include pub true false null break continue as match";
         let mut l = Lexer::new(input);
         
         assert_eq!(l.next_token(), Token::Let);
@@ -378,6 +386,9 @@ let result = add(five, ten);
         assert_eq!(l.next_token(), Token::In);
         assert_eq!(l.next_token(), Token::Class);
         assert_eq!(l.next_token(), Token::Struct);
+        assert_eq!(l.next_token(), Token::Enum);
+        assert_eq!(l.next_token(), Token::Trait);
+        assert_eq!(l.next_token(), Token::Impl);
         assert_eq!(l.next_token(), Token::Import);
         assert_eq!(l.next_token(), Token::Include);
         assert_eq!(l.next_token(), Token::Pub);
@@ -393,7 +404,7 @@ let result = add(five, ten);
     
     #[test]
     fn test_operators() {
-        let input = "== != <= >= -> => .. && || ! % # .";
+        let input = "== != <= >= -> => .. && || ! % # . ?";
         let mut l = Lexer::new(input);
         
         assert_eq!(l.next_token(), Token::EqualEqual);
@@ -409,6 +420,7 @@ let result = add(five, ten);
         assert_eq!(l.next_token(), Token::Percent);
         assert_eq!(l.next_token(), Token::Hash);
         assert_eq!(l.next_token(), Token::Dot);
+        assert_eq!(l.next_token(), Token::QuestionMark);
         assert_eq!(l.next_token(), Token::EOF);
     }
     

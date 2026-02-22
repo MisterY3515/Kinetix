@@ -121,7 +121,7 @@ pub struct MirProgram {
 pub fn is_trivially_copyable(ty: &Type) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Void | Type::Fn(_, _) | Type::Ref(_) => true,
-        Type::Str | Type::Array(_) | Type::Map(_, _) | Type::Named(_) | Type::Var(_) | Type::MutRef(_) => false,
+        Type::Str | Type::Array(_) | Type::Map(_, _) | Type::Custom { .. } | Type::Var(_) | Type::MutRef(_) => false,
     }
 }
 

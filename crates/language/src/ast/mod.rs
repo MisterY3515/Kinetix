@@ -60,6 +60,25 @@ pub enum Statement<'a> {
         build: i64,
         line: usize,
     },
+    Enum {
+        name: String,
+        generics: Vec<String>,
+        variants: Vec<(String, Option<String>)>, // VariantName(OptionalPayloadType)
+        line: usize,
+    },
+    Trait {
+        name: String,
+        generics: Vec<String>,
+        methods: Vec<(String, Vec<(String, String)>, String)>, // MethodName, Params, ReturnType
+        line: usize,
+    },
+    Impl {
+        trait_name: Option<String>,
+        target_name: String,
+        generics: Vec<String>,
+        methods: Vec<Statement<'a>>, // Functions
+        line: usize,
+    },
     Break { line: usize },
     Continue { line: usize },
 }
@@ -116,6 +135,9 @@ pub enum Expression<'a> {
     Range {
         start: &'a Expression<'a>,
         end: &'a Expression<'a>,
+    },
+    Try {
+        value: &'a Expression<'a>,
     },
 }
 

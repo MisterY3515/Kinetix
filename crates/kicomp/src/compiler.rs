@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 10;
+pub const CURRENT_BUILD: i64 = 11;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
@@ -132,6 +132,7 @@ impl Compiler {
             | Statement::Function { line, .. } | Statement::While { line, .. }
             | Statement::For { line, .. } | Statement::Include { line, .. }
             | Statement::Class { line, .. } | Statement::Struct { line, .. }
+            | Statement::Enum { line, .. } | Statement::Trait { line, .. } | Statement::Impl { line, .. }
             | Statement::Break { line } | Statement::Continue { line }
             | Statement::Version { line, .. } => {
                 self.current_line = *line as u32;
@@ -207,8 +208,9 @@ impl Compiler {
             Statement::Include { .. } => {
                 // Includes resolved at higher level
             }
-            Statement::Class { .. } | Statement::Struct { .. } => {
-                // Deferred to M4
+            Statement::Class { .. } | Statement::Struct { .. } 
+            | Statement::Enum { .. } | Statement::Trait { .. } | Statement::Impl { .. } => {
+                // Deferred to M4 / Phase 2
             }
             Statement::Break { .. } | Statement::Continue { .. } => {
                 // Handled by loop context (M4)
@@ -346,6 +348,7 @@ impl Compiler {
                 self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
+            Expression::Try { value } => self.compile_expression(value), // TEMPORARY stub
             Expression::Float(val) => {
                 let reg = self.alloc_register();
                 let idx = self.current_fn().add_constant(Constant::Float(*val));
