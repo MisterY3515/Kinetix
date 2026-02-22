@@ -14,3 +14,7 @@ pub mod mir;
 pub mod borrowck;
 pub mod trait_solver;
 pub mod exhaustiveness;
+pub mod type_normalize;
+pub mod monomorphize;
+pub mod mono_validate;
+pub mod drop_verify;

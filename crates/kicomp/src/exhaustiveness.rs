@@ -5,7 +5,7 @@ use crate::symbol::SymbolTable;
 /// Validates that a list of match arms exhaustively covers the structural space of `match_ty`.
 /// For Kinetix Phase 2, we implement a 1D mapping matrix to evaluate Enum variant coverage
 /// and Primitive infinite domain coverage.
-pub fn check_exhaustiveness(match_ty: &Type, arms: &[HirPattern], symbols: &SymbolTable) -> Result<(), String> {
+pub fn check_exhaustiveness(match_ty: &Type, arms: &[HirPattern], _symbols: &SymbolTable) -> Result<(), String> {
     // 1. Wildcard (`_`) or unconditional binding (`x`) provides immediate exhaustive coverage.
     for arm in arms {
         match arm {

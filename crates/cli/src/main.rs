@@ -14,7 +14,8 @@ const BUNDLE_SIGNATURE: &[u8] = b"KINETIX_BUNDLE_V1";
 
 #[derive(ClapParser)]
 #[command(name = "kivm")]
-#[command(about = "KiVM — Kinetix bytecode virtual machine")]
+#[command(version = "0.0.6 (14)")]
+#[command(about = "Kinetix Virtual Machine & Compiler")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -269,9 +270,6 @@ fn check_for_bundle() -> Option<kinetix_kicomp::ir::CompiledProgram> {
     // Read payload size (u64) - it's before the signature in my design? 
     // Wait, typical is [Payload] [Size] [Sig].
     // I sought to End - Sig - 8.
-    // So reading 8 bytes now.
-    // Actually, let's just seek back 8 more bytes.
-    // My seek was: End - (17 + 8).
     // So current position is at [Size].
     // Let's read size.
     let mut size_buf = [0u8; 8];
@@ -342,7 +340,8 @@ fn run() -> Result<(), String> {
             }
             traits.validate_cycles().map_err(|e| format_pipeline_error(&file, "Trait Resolver", vec![e]))?;
 
-            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+            let mut hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+            kinetix_kicomp::type_normalize::normalize(&mut hir).map_err(|e| format_pipeline_error(&file, "Type Normalizer", vec![e]))?;
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
@@ -356,6 +355,18 @@ fn run() -> Result<(), String> {
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&file, "Borrow Checker", errs)
+            })?;
+
+            let mir = kinetix_kicomp::monomorphize::monomorphize(&mir).map_err(|e| {
+                format_pipeline_error(&file, "Monomorphization Pass", vec![e])
+            })?;
+
+            kinetix_kicomp::mono_validate::validate(&mir).map_err(|e| {
+                format_pipeline_error(&file, "Post-Mono Validator", vec![e])
+            })?;
+
+            kinetix_kicomp::drop_verify::verify(&mir).map_err(|e| {
+                format_pipeline_error(&file, "Drop Order Verifier", vec![e])
             })?;
 
             #[cfg(feature = "llvm")]
@@ -419,7 +430,8 @@ fn run() -> Result<(), String> {
             }
             traits.validate_cycles().map_err(|e| format_pipeline_error(&input, "Trait Resolver", vec![e]))?;
 
-            let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+            let mut hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+            kinetix_kicomp::type_normalize::normalize(&mut hir).map_err(|e| format_pipeline_error(&input, "Type Normalizer", vec![e]))?;
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
@@ -433,6 +445,18 @@ fn run() -> Result<(), String> {
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&input, "Borrow Checker", errs)
+            })?;
+
+            let mir = kinetix_kicomp::monomorphize::monomorphize(&mir).map_err(|e| {
+                format_pipeline_error(&input, "Monomorphization Pass", vec![e])
+            })?;
+
+            kinetix_kicomp::mono_validate::validate(&mir).map_err(|e| {
+                format_pipeline_error(&input, "Post-Mono Validator", vec![e])
+            })?;
+
+            kinetix_kicomp::drop_verify::verify(&mir).map_err(|e| {
+                format_pipeline_error(&input, "Drop Order Verifier", vec![e])
             })?;
 
             let mut compiler = Compiler::new();
@@ -512,8 +536,7 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Version => {
-            let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
-            println!("Kinetix CLI v{} ({})", env!("CARGO_PKG_VERSION"), build);
+            println!("  Kinetix v0.0.6 (14)");
         }
         Commands::Shell => {
             run_shell();

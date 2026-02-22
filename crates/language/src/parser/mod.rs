@@ -486,8 +486,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 self.next_token();
             }
         }
-        if self.cur_token == Token::RBrace { self.next_token(); }
-        
+        // Do NOT consume RBrace here, parse_program handles it
         Some(Statement::Enum { name, generics, variants, line: start_line })
     }
 
@@ -550,8 +549,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 self.next_token();
             }
         }
-        if self.cur_token == Token::RBrace { self.next_token(); }
-        
+        // Do NOT consume RBrace here
         Some(Statement::Trait { name, generics, methods, line: start_line })
     }
 
@@ -592,12 +590,20 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 if let Some(stmt) = self.parse_fn_statement() {
                     methods.push(stmt);
                 }
+                // `parse_fn_statement` (via `parse_block_statement`) leaves `cur_token` at the function's closing `RBrace`.
+                // We must skip it to continue parsing other methods or reach the impl's closing `RBrace`.
+                if self.cur_token == Token::RBrace { 
+                    self.next_token(); 
+                }
+                // Also skip semicolons if any
+                if self.cur_token == Token::Semicolon {
+                    self.next_token();
+                }
             } else {
                 self.next_token();
             }
         }
-        if self.cur_token == Token::RBrace { self.next_token(); }
-        
+        // Do NOT consume RBrace here
         Some(Statement::Impl { trait_name, target_name, generics, methods, line: start_line })
     }
 
