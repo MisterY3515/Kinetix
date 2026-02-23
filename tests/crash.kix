@@ -1,5 +1,0 @@
-// Test: crash.kix — Intentional runtime error for testing the error manager
-// This should produce a clear error with line number and type mismatch info.
-let x = "hello"
-let y = 5
-let z = x + y

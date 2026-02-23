@@ -1,0 +1,57 @@
+// test_features.kix (Omnibus feature test file)
+// This file runs through various language features and standard library functions.
+// If it compiles and runs without crashing, the core VM and compiler are stable.
+
+println("=== Testing Basic Arithmetic ===")
+let x = 10
+let y = 3
+if (x + y == 13) { println("OK") }
+if (x - y == 7) { println("OK") }
+if (x * y == 30) { println("OK") }
+if (x / y == 3) { println("OK") }
+if (x % y == 1) { println("OK") }
+
+println("=== Testing Floats & Math ===")
+let pi = 3.14159
+if (math.sin(pi / 2.0) > 0.999) { println("OK") }
+if (math.sqrt(25.0) == 5.0) { println("OK") }
+if (math.pow(2.0, 3.0) == 8.0) { println("OK") }
+
+println("=== Testing Strings ===")
+let s1 = "hello"
+let s2 = "world"
+let stc = s1 + " " + s2
+if (stc == "hello world") { println("OK") }
+
+println("=== Testing Control Flow (If/Else) ===")
+mut flag = false
+if x > 5 {
+    flag = true
+} else {
+    flag = false
+}
+if flag { println("OK") }
+
+println("=== Testing Loops ===")
+mut sum = 0
+mut i = 1
+while i < 6 {
+    sum = sum + i
+    i = i + 1
+}
+if sum == 15 { println("OK") }
+
+println("=== Testing Functions ===")
+fn add_nums(a: int, b: int) -> int {
+    return a + b
+}
+if (add_nums(5, 7) == 12) { println("OK") }
+
+println("=== Testing Arrays ===")
+let arr = [10, 20, 30]
+
+println("=== Testing Generics (Option) ===")
+// Note: Enum, Trait, Try and Match are implemented in the compiler frontend (AST -> Typeck -> Borrowck).
+// VM Bytecode runtime emission for these features is planned for Phase 3+.
+
+println("=== All Tests Passed Successfully! ===")

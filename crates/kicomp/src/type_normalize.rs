@@ -110,21 +110,9 @@ fn normalize_expr(expr: &mut HirExpression) -> Result<(), String> {
             normalize_expr(left)?;
             normalize_expr(right)?;
         }
-        HirExprKind::Call { function, arguments } => {
-            normalize_expr(function)?;
-            for arg in arguments {
-                normalize_expr(arg)?;
-            }
-        }
-        HirExprKind::Assign { value: right, target: _ } => {
-            normalize_expr(right)?;
-        }
-        HirExprKind::Prefix { right, .. } => {
-            normalize_expr(right)?;
-        }
-        HirExprKind::Infix { left, right, .. } => {
-            normalize_expr(left)?;
-            normalize_expr(right)?;
+        HirExprKind::Assign { value, target } => {
+            normalize_expr(target)?;
+            normalize_expr(value)?;
         }
 
         // Try is not a HirExprKind variant (it is compiled into Match early)

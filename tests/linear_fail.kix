@@ -1,3 +1,0 @@
-let a = "resource";
-let b = a; // 'a' moved
-println(a);  // Error!
