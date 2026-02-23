@@ -57,6 +57,8 @@ pub enum RValue {
     Call(Operand, Vec<Operand>),
     /// Array construction.
     Array(Vec<Operand>),
+    /// Struct or Aggregate construction.
+    Aggregate(String, Vec<Operand>),
 }
 
 #[derive(Debug, Clone)]
@@ -322,6 +324,12 @@ impl<'a> MirBuilder<'a> {
                     .map(|e| self.lower_expression_to_operand(e))
                     .collect();
                 RValue::Array(ops)
+            }
+            HirExprKind::StructLiteral(name, fields) => {
+                let ops: Vec<Operand> = fields.iter()
+                    .map(|(_, e)| self.lower_expression_to_operand(e))
+                    .collect();
+                RValue::Aggregate(name.clone(), ops)
             }
             _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for Match, MemberAccess, etc.
         }

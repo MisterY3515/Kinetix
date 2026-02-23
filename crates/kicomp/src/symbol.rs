@@ -248,6 +248,11 @@ fn resolve_expression<'a>(expr: &Expression<'a>, table: &mut SymbolTable, errors
                 resolve_expression(arg, table, errors, line);
             }
         }
+        Expression::StructLiteral { fields, .. } => {
+            for (_, field_expr) in fields {
+                resolve_expression(field_expr, table, errors, line);
+            }
+        }
         Expression::FunctionLiteral { parameters, body, .. } => {
             table.enter_scope();
             for (pname, ptype) in parameters {

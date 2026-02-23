@@ -22,6 +22,7 @@ pub struct Parser<'src, 'arena> {
     cur_token: Token,
     peek_token: Token,
     pub errors: Vec<String>,
+    allow_struct_literal: bool,
 }
 
 impl<'src, 'arena> Parser<'src, 'arena> {
@@ -32,6 +33,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             cur_token: Token::EOF,
             peek_token: Token::EOF,
             errors: vec![],
+            allow_struct_literal: true,
         };
         p.next_token();
         p.next_token();
@@ -226,7 +228,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     fn parse_while_statement(&mut self) -> Option<Statement<'arena>> {
         let start_line = self.lexer.line;
         self.next_token(); // consume 'while'
+        
+        let prev_allow = self.allow_struct_literal;
+        self.allow_struct_literal = false;
         let condition = self.parse_expression(Precedence::Lowest)?;
+        self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
@@ -252,7 +258,10 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
         self.next_token();
         
+        let prev_allow = self.allow_struct_literal;
+        self.allow_struct_literal = false;
         let range = self.parse_expression(Precedence::Lowest)?;
+        self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
         let body = self.parse_block_statement()?;
@@ -659,7 +668,13 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     fn parse_prefix(&mut self) -> Option<Expression<'arena>> {
         match &self.cur_token {
-            Token::Identifier(name) => Some(Expression::Identifier(name.clone())),
+            Token::Identifier(name) => {
+                let name_clone = name.clone();
+                if self.allow_struct_literal && self.peek_token == Token::LBrace {
+                    return self.parse_struct_literal_expr(name_clone);
+                }
+                Some(Expression::Identifier(name_clone))
+            },
             Token::Integer(val) => Some(Expression::Integer(*val)),
             Token::Float(val) => Some(Expression::Float(*val)),
             Token::String(val) => Some(Expression::String(val.clone())),
@@ -775,6 +790,38 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         Some(Expression::ArrayLiteral(elements))
     }
 
+    fn parse_struct_literal_expr(&mut self, name: String) -> Option<Expression<'arena>> {
+        self.next_token(); // advance to LBrace
+        
+        let mut fields = vec![];
+        
+        while self.peek_token != Token::RBrace && self.peek_token != Token::EOF {
+            self.next_token(); // advance to field identifier
+            
+            let field_name = match &self.cur_token {
+                Token::Identifier(n) => n.clone(),
+                _ => {
+                    self.push_error(format!("Expected field name in struct '{name}', got {:?}", self.cur_token));
+                    return None;
+                }
+            };
+            
+            if !self.expect_peek(Token::Colon) { return None; }
+            self.next_token(); // advance to value
+            
+            let value = self.parse_expression(Precedence::Lowest)?;
+            fields.push((field_name, value));
+            
+            if self.peek_token == Token::Comma {
+                self.next_token(); // consume comma
+            }
+        }
+        
+        if !self.expect_peek(Token::RBrace) { return None; }
+        
+        Some(Expression::StructLiteral { name, fields })
+    }
+
     fn parse_expression_list(&mut self, end_token: Token) -> Option<Vec<Expression<'arena>>> {
         let mut list = vec![];
 
@@ -798,7 +845,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     fn parse_if_expression(&mut self) -> Option<Expression<'arena>> {
         self.next_token(); // skip if
+        
+        let prev_allow = self.allow_struct_literal;
+        self.allow_struct_literal = false;
         let condition = self.parse_expression(Precedence::Lowest)?;
+        self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
         let consequence = self.parse_block_statement()?;
@@ -830,7 +881,11 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     fn parse_match_expression(&mut self) -> Option<Expression<'arena>> {
         self.next_token(); // Skip 'match'
+        
+        let prev_allow = self.allow_struct_literal;
+        self.allow_struct_literal = false;
         let value = self.parse_expression(Precedence::Lowest)?;
+        self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
         self.next_token(); // now inside block

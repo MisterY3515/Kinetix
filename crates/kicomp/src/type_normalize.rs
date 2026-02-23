@@ -79,6 +79,11 @@ fn normalize_expr(expr: &mut HirExpression) -> Result<(), String> {
                 normalize_expr(el)?;
             }
         }
+        HirExprKind::StructLiteral(_, fields) => {
+            for (_, field_expr) in fields {
+                normalize_expr(field_expr)?;
+            }
+        }
         HirExprKind::MapLiteral(entries) => {
             for (k, v) in entries {
                 normalize_expr(k)?;

@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 15;
+pub const CURRENT_BUILD: i64 = 16;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
@@ -57,7 +57,6 @@ impl Compiler {
         }
     }
 
-    /// Compile a full program (list of statements).
     pub fn compile(&mut self, statements: &[Statement<'_>]) -> Result<&CompiledProgram, String> {
         for stmt in statements {
             self.compile_statement(stmt)?;
@@ -365,6 +364,14 @@ impl Compiler {
                 let reg = self.alloc_register();
                 let opcode = if *val { Opcode::LoadTrue } else { Opcode::LoadFalse };
                 self.emit_instr(Instruction::a_only(opcode, reg));
+                Ok(reg)
+            }
+            Expression::StructLiteral { .. } => {
+                // Return a dummy register (Null) instead of aborting the compilation.
+                // The VM does not fully support structs yet (Phase 3 Backend target),
+                // but this allows typechecking and MIR borrow checking to proceed.
+                let reg = self.alloc_register();
+                self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
                 Ok(reg)
             }
             Expression::Null => {

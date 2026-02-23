@@ -367,6 +367,31 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 }
                 Err(format!("Cannot resolve function call: {:?}", function))
             }
+            Expression::StructLiteral { name, fields } => {
+                // In Phase 3 Step 6, we map Kinetix Struct -> LLVM StructType.
+                // For MVP nominals, we define an opaque struct or auto-populate it 
+                // heavily relying on i64 primitive pointers (to match Kinetix v0.0.6 primitives).
+                
+                // Let's dynamically assert a struct type with N i64s
+                let struct_type = self.context.opaque_struct_type(name);
+                let element_types: Vec<BasicTypeEnum> = fields.iter().map(|_| self.context.i64_type().into()).collect();
+                struct_type.set_body(&element_types, false);
+                
+                // Allocate it
+                let alloca = self.builder.build_alloca(struct_type, &format!("struct_{}", name)).map_err(|e| e.to_string())?;
+                
+                // Populate fields
+                for (i, (_, field_expr)) in fields.iter().enumerate() {
+                    let field_val = self.compile_expression(field_expr)?;
+                    let ptr = self.builder.build_struct_gep(struct_type, alloca, i as u32, "field_ptr").map_err(|e| e.to_string())?;
+                    self.builder.build_store(ptr, field_val).map_err(|e| e.to_string())?;
+                }
+                
+                // Return the struct value loaded from memory (or the pointer if handled elsewhere).
+                // Phase 3 restricts struct moves to copy-by-value until Phase 4 (References).
+                let load = self.builder.build_load(struct_type, alloca, "struct_load").map_err(|e| e.to_string())?;
+                Ok(load)
+            }
             _ => Err(format!("Expression type not supported in LLVM Backend MVP: {:?}", expr)),
         }
     }
