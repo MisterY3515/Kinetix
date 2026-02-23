@@ -279,7 +279,16 @@ fn resolve_expression<'a>(expr: &Expression<'a>, table: &mut SymbolTable, errors
         Expression::Match { value, arms } => {
             resolve_expression(value, table, errors, line);
             for (pattern, body) in arms {
-                resolve_expression(pattern, table, errors, line);
+                // Ignore pattern resolution for now, or just ignore "_"
+                if let Expression::Identifier(name) = pattern {
+                    if name != "_" {
+                        // Normally pat variables should be declared, but match arms bind them
+                        // For wildcard, we definitely ignore it.
+                        // (Optional: add them to scope if they are binding variables)
+                    }
+                } else {
+                    // For nested patterns, wait until full pattern matching is supported
+                }
                 resolve_statement(body, table, errors);
             }
         }

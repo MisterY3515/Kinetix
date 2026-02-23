@@ -117,27 +117,42 @@ impl Substitution {
     }
 
     /// Apply this substitution to a type, recursively resolving variables.
+    /// Unbound type variables remain as-is (used during type-checking).
     pub fn apply(&self, ty: &Type) -> Type {
+        self.apply_inner(ty, false)
+    }
+
+    /// Apply this substitution, defaulting any unresolved Type::Var to Type::Void.
+    /// Use this ONLY after type-checking is complete (e.g. during MIR lowering).
+    pub fn apply_default(&self, ty: &Type) -> Type {
+        self.apply_inner(ty, true)
+    }
+
+    fn apply_inner(&self, ty: &Type, default_unresolved: bool) -> Type {
         match ty {
             Type::Var(id) => {
                 if let Some(resolved) = self.map.get(id) {
                     // Chase the substitution chain
-                    self.apply(resolved)
+                    self.apply_inner(resolved, default_unresolved)
+                } else if default_unresolved {
+                    // Post-typeck: unresolved polymorphic params (like println's T)
+                    // default to Void so they don't survive into MIR/Mono.
+                    Type::Void
                 } else {
                     ty.clone()
                 }
             }
             Type::Fn(params, ret) => {
-                let params = params.iter().map(|p| self.apply(p)).collect();
-                let ret = Box::new(self.apply(ret));
+                let params = params.iter().map(|p| self.apply_inner(p, default_unresolved)).collect();
+                let ret = Box::new(self.apply_inner(ret, default_unresolved));
                 Type::Fn(params, ret)
             }
-            Type::Array(inner) => Type::Array(Box::new(self.apply(inner))),
-            Type::Map(k, v) => Type::Map(Box::new(self.apply(k)), Box::new(self.apply(v))),
-            Type::Ref(inner) => Type::Ref(Box::new(self.apply(inner))),
-            Type::MutRef(inner) => Type::MutRef(Box::new(self.apply(inner))),
+            Type::Array(inner) => Type::Array(Box::new(self.apply_inner(inner, default_unresolved))),
+            Type::Map(k, v) => Type::Map(Box::new(self.apply_inner(k, default_unresolved)), Box::new(self.apply_inner(v, default_unresolved))),
+            Type::Ref(inner) => Type::Ref(Box::new(self.apply_inner(inner, default_unresolved))),
+            Type::MutRef(inner) => Type::MutRef(Box::new(self.apply_inner(inner, default_unresolved))),
             Type::Custom { name, args } => {
-                let mapped_args = args.iter().map(|a| self.apply(a)).collect();
+                let mapped_args = args.iter().map(|a| self.apply_inner(a, default_unresolved)).collect();
                 Type::Custom { name: name.clone(), args: mapped_args }
             }
             _ => ty.clone(), // Primitives (Int, Float, Bool, Str, Void)
@@ -200,7 +215,8 @@ mod tests {
 
         assert_eq!(sub.apply(&Type::Var(0)), Type::Int);
         assert_eq!(sub.apply(&Type::Var(1)), Type::Int); // chased
-        assert_eq!(sub.apply(&Type::Var(99)), Type::Var(99)); // unbound
+        assert_eq!(sub.apply(&Type::Var(99)), Type::Var(99)); // unbound stays as Var during typeck
+        assert_eq!(sub.apply_default(&Type::Var(99)), Type::Void); // but defaults to Void post-typeck
     }
 
     #[test]

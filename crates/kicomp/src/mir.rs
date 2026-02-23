@@ -153,7 +153,7 @@ impl<'a> MirBuilder<'a> {
     }
 
     fn push_local(&mut self, name: Option<String>, ty: Type, mutability: Mutability) -> LocalId {
-        let resolved_ty = self.substitution.apply(&ty);
+        let resolved_ty = self.substitution.apply_default(&ty);
         let id = LocalId(self.locals.len());
         self.locals.push(LocalDecl { name: name.clone(), ty: resolved_ty, mutability });
         if let Some(n) = name {
@@ -250,7 +250,7 @@ impl<'a> MirBuilder<'a> {
                 let mir_fn = MirFunction {
                     name: name.clone(),
                     args: arg_ids,
-                    return_ty: self.substitution.apply(return_type),
+                    return_ty: self.substitution.apply_default(return_type),
                     locals: sub_builder.locals,
                     basic_blocks: sub_builder.basic_blocks,
                 };
@@ -274,7 +274,7 @@ impl<'a> MirBuilder<'a> {
             HirExprKind::Identifier(name) => {
                 if let Some(&local_id) = self.local_env.get(name) {
                     let place = Place { local: local_id };
-                    let resolved_ty = self.substitution.apply(&expr.ty);
+                    let resolved_ty = self.substitution.apply_default(&expr.ty);
                     if is_trivially_copyable(&resolved_ty) {
                         RValue::Use(Operand::Copy(place))
                     } else {
@@ -310,7 +310,20 @@ impl<'a> MirBuilder<'a> {
                 let r_place = self.lower_expression_to_operand(right);
                 RValue::UnaryOp(operator.clone(), r_place)
             }
-            _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for others
+            HirExprKind::Call { function, arguments } => {
+                let func_op = self.lower_expression_to_operand(function);
+                let arg_ops: Vec<Operand> = arguments.iter()
+                    .map(|a| self.lower_expression_to_operand(a))
+                    .collect();
+                RValue::Call(func_op, arg_ops)
+            }
+            HirExprKind::ArrayLiteral(elems) => {
+                let ops: Vec<Operand> = elems.iter()
+                    .map(|e| self.lower_expression_to_operand(e))
+                    .collect();
+                RValue::Array(ops)
+            }
+            _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for Match, MemberAccess, etc.
         }
     }
 
@@ -324,7 +337,7 @@ impl<'a> MirBuilder<'a> {
             line: 0, // temp
         });
         
-        let resolved_ty = self.substitution.apply(&expr.ty);
+        let resolved_ty = self.substitution.apply_default(&expr.ty);
         if is_trivially_copyable(&resolved_ty) {
             Operand::Copy(place)
         } else {

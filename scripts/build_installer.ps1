@@ -12,7 +12,7 @@ Write-Host "`n[1/3] Compiling kivm and kicomp..." -ForegroundColor Yellow
 Push-Location $root
 
 # Set build version for CLI/Comp to pick up
-$env:KINETIX_BUILD = "14"
+$env:KINETIX_BUILD = "15"
 
 # Clean to ensure env var is picked up
 cargo clean -p kinetix-cli -p kinetix-kicomp

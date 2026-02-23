@@ -1,0 +1,62 @@
+// Phase 0 Core Test — Kinetix v0.0.4
+// Verifica: tipi primitivi, operatori, flusso di controllo, stringhe, array
+
+// 1. Tipi primitivi
+let x = 42
+let pi = 3.14159
+let active = true
+let greeting = "Hello Kinetix"
+
+// 2. Operatori aritmetici
+let sum = 10 + 20
+let diff = 50 - 15
+let prod = 6 * 7
+let quot = 100 / 4
+
+// 3. Operatori di confronto
+let eq = (sum == 30)
+let lt = (diff < 100)
+let gt = (prod > 40)
+
+// 4. Operatori logici
+let both = (active && eq)
+let either = (active || false)
+
+// 5. Stringhe
+let lang = "Kinetix"
+let version = "v0.0.4"
+
+// 6. Array
+let numbers = [1, 2, 3, 4, 5]
+
+// 7. Flusso di controllo — If/Else
+if active {
+    println("Active is true")
+} else {
+    println("Active is false")
+}
+
+// 8. Flusso di controllo — While
+mut counter = 0
+while counter < 5 {
+    counter = counter + 1
+}
+println("Counter: ")
+println(counter)
+
+// 9. Math (LLVM native)
+let s = math.sin(1.5708)
+let r = math.sqrt(144.0)
+println(" Sin: ")
+println(s)
+println(" Sqrt: ")
+println(r)
+
+// 10. Nesting
+if sum > 20 {
+    if diff < 50 {
+        println(" Nested OK")
+    }
+}
+
+println(" Phase 0 Test Complete")

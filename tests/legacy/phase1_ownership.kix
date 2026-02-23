@@ -1,0 +1,5 @@
+fn main() {
+    let a = "hello linear types"
+    let b = a // 'a' is moved here
+    let c = a // ERROR: Use of moved variable 'a'
+}
