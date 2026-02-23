@@ -16,5 +16,6 @@ pub mod trait_solver;
 pub mod exhaustiveness;
 pub mod type_normalize;
 pub mod monomorphize;
+pub mod ssa_validate;
 pub mod mono_validate;
 pub mod drop_verify;

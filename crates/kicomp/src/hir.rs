@@ -122,6 +122,7 @@ pub enum HirExprKind {
         return_type: Type,
     },
     ArrayLiteral(Vec<HirExpression>),
+    StructLiteral(String, Vec<(String, HirExpression)>),
     MapLiteral(Vec<(HirExpression, HirExpression)>),
     Index {
         left: Box<HirExpression>,
@@ -339,6 +340,16 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
             HirExpression {
                 kind: HirExprKind::Match { value: Box::new(val), arms: hir_arms },
                 ty: match_ty,
+            }
+        }
+        Expression::StructLiteral { name, fields } => {
+            let mut hir_fields = vec![];
+            for (fname, fexpr) in fields {
+                hir_fields.push((fname.clone(), lower_expression(fexpr, symbols, traits, fresh, env)));
+            }
+            HirExpression {
+                kind: HirExprKind::StructLiteral(name.clone(), hir_fields),
+                ty: Type::Custom { name: name.clone(), args: vec![] },
             }
         }
         Expression::Identifier(name) => {

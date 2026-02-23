@@ -29,3 +29,13 @@ match opt {
 // 6. Generic Type Parameter Survival (Regression from Build 15)
 // Attempting to resolve generic types with no concrete substitution
 // println(); // Too few args, but if T was allowed to survive, validate_mono would catch it.
+
+// 7. StructLiteral syntax errors (Phase 3 Step 1 Validation)
+// let broken_struct = Point { x: 10 y: 20 }; // ERROR: Expected comma or RBrace
+// let no_name = { x: 10 }; // ERROR: Expected name before LBrace
+// let no_brace = Point x: 10; // ERROR: Expected {
+
+// 8. Linear Struct Aggregation (Phase 3 Step 3 Validation)
+// let my_str = "Im moved!";
+// let packet = Packet { msg: my_str };
+// println(my_str); // ERROR: Cannot copy from an uninitialized or moved variable 'my_str'

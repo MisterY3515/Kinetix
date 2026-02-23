@@ -109,6 +109,10 @@ pub enum Expression<'a> {
         function: &'a Expression<'a>,
         arguments: Vec<Expression<'a>>,
     },
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, Expression<'a>)>,
+    },
     FunctionLiteral {
         parameters: Vec<(String, String)>,
         body: &'a Statement<'a>,

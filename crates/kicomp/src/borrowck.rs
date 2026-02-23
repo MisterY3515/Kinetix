@@ -104,6 +104,11 @@ impl BorrowChecker {
                     self.check_operand(elem, line, locals, states, errors);
                 }
             }
+            RValue::Aggregate(_, ops) => {
+                for op in ops {
+                    self.check_operand(op, line, locals, states, errors);
+                }
+            }
         }
     }
 

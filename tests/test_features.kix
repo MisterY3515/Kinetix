@@ -54,4 +54,9 @@ println("=== Testing Generics (Option) ===")
 // Note: Enum, Trait, Try and Match are implemented in the compiler frontend (AST -> Typeck -> Borrowck).
 // VM Bytecode runtime emission for these features is planned for Phase 3+.
 
+println("=== Testing Linear Structs (Phase 3 AST Parsing) ===")
+let my_struct = DataPacket { id: 101, valid: true }
+// Note: Backend struct allocation is pending Step 6. 
+// If this compiles to HIR without crashing, the Parser and Type Normalization updates are successful.
+
 println("=== All Tests Passed Successfully! ===")
