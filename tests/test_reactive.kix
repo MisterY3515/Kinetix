@@ -1,0 +1,24 @@
+print "--- Starting Reactive Core Test ---";
+
+print "--- Starting Reactive Core Test ---";
+
+state counter = 0;
+computed double_counter = counter * 2;
+computed squared_counter = counter * counter;
+
+print "--- Current Tick ---";
+print counter;
+print double_counter;
+print "   ";
+
+if (counter == 0) {
+    print "Mutating counter to 5...";
+    counter = 5;
+    // The frame scheduler should catch this at the end of the script and re-run.
+} else if (counter == 5) {
+    print "Mutating counter to 10...";
+    counter = 10;
+} else if (counter == 10) {
+    print "Finished reactive updates!";
+    counter = 10;
+}

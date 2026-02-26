@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build script for Linux
 set -e
-export KINETIX_BUILD="16"
+export KINETIX_BUILD="17"
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."

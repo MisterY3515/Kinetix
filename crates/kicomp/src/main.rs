@@ -61,8 +61,10 @@ fn main() {
     }
 
     // Compile
+    // NOTE: Reactive graph construction requires HIR (not raw AST).
+    // The CLI will wire the full HIR pipeline in a future step.
     let mut compiler = Compiler::new();
-    match compiler.compile(&program.statements) {
+    match compiler.compile(&program.statements, None) {
         Ok(compiled) => {
             let output_path = cli.output.unwrap_or_else(|| {
                 cli.input.with_extension("exki")

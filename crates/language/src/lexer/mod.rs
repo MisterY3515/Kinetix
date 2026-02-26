@@ -26,6 +26,9 @@ pub enum Token {
     Continue,
     As,
     Match,
+    State,
+    Computed,
+    Effect,
     
     // Literals
     Identifier(String),
@@ -262,6 +265,9 @@ impl<'a> Lexer<'a> {
                         "continue" => Token::Continue,
                         "as" => Token::As,
                         "match" => Token::Match,
+                        "state" => Token::State,
+                        "computed" => Token::Computed,
+                        "effect" => Token::Effect,
                         _ => Token::Identifier(ident),
                     };
                 } else if ch.is_digit(10) {
@@ -372,7 +378,7 @@ let result = add(five, ten);
     
     #[test]
     fn test_keywords() {
-        let input = "let mut fn return if else while for in class struct enum trait impl import include pub true false null break continue as match";
+        let input = "let mut fn return if else while for in class struct enum trait impl import include pub true false null break continue as match state computed";
         let mut l = Lexer::new(input);
         
         assert_eq!(l.next_token(), Token::Let);
@@ -399,6 +405,8 @@ let result = add(five, ten);
         assert_eq!(l.next_token(), Token::Continue);
         assert_eq!(l.next_token(), Token::As);
         assert_eq!(l.next_token(), Token::Match);
+        assert_eq!(l.next_token(), Token::State);
+        assert_eq!(l.next_token(), Token::Computed);
         assert_eq!(l.next_token(), Token::EOF);
     }
     

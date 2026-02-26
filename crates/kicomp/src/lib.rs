@@ -19,3 +19,5 @@ pub mod monomorphize;
 pub mod ssa_validate;
 pub mod mono_validate;
 pub mod drop_verify;
+pub mod benchmarks;
+pub mod reactive;

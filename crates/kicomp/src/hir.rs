@@ -43,6 +43,18 @@ pub enum HirStmtKind {
         mutable: bool,
         value: HirExpression,
     },
+    State {
+        name: String,
+        value: HirExpression,
+    },
+    Computed {
+        name: String,
+        value: HirExpression,
+    },
+    Effect {
+        dependencies: Vec<String>,
+        body: Box<HirStatement>,
+    },
     Return {
         value: Option<HirExpression>,
     },
@@ -177,12 +189,39 @@ fn get_line(stmt: &Statement) -> usize {
         Statement::Version { line, .. } => *line,
         Statement::Break { line } => *line,
         Statement::Continue { line } => *line,
+        Statement::State { line, .. } => *line,
+        Statement::Computed { line, .. } => *line,
+        Statement::Effect { line, .. } => *line,
     }
 }
 
 fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &crate::trait_solver::TraitEnvironment, fresh: &mut FreshCounter, env: &mut std::collections::HashMap<String, Type>) -> HirStatement {
     let line = get_line(stmt);
     match stmt {
+        Statement::State { name, type_hint: _, value, .. } => {
+            let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            HirStatement {
+                kind: HirStmtKind::State { name: name.clone(), value: hir_val },
+                ty: Type::Void,
+                line,
+            }
+        }
+        Statement::Computed { name, type_hint: _, value, .. } => {
+            let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            HirStatement {
+                kind: HirStmtKind::Computed { name: name.clone(), value: hir_val },
+                ty: Type::Void,
+                line,
+            }
+        }
+        Statement::Effect { dependencies, body, .. } => {
+            let hir_body = lower_statement(body, symbols, traits, fresh, env);
+            HirStatement {
+                kind: HirStmtKind::Effect { dependencies: dependencies.clone(), body: Box::new(hir_body) },
+                ty: Type::Void,
+                line,
+            }
+        }
         Statement::Let { name, mutable, type_hint, value, .. } => {
             let val = lower_expression(value, symbols, traits, fresh, env);
             let ty = match type_hint {
@@ -256,7 +295,7 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &cra
         }
         Statement::Break { .. } => HirStatement { kind: HirStmtKind::Break, ty: Type::Void, line },
         Statement::Continue { .. } => HirStatement { kind: HirStmtKind::Continue, ty: Type::Void, line },
-        // Class, Struct, Include, Version — skip for now (handled in later phases)
+        // Class, Struct, Include, Version — skip for now
         _ => HirStatement { kind: HirStmtKind::Break, ty: Type::Void, line },
     }
 }

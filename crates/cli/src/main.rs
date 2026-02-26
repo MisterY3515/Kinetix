@@ -14,7 +14,7 @@ const BUNDLE_SIGNATURE: &[u8] = b"KINETIX_BUNDLE_V1";
 
 #[derive(ClapParser)]
 #[command(name = "kivm")]
-#[command(version = "0.0.6 (14)")]
+#[command(version)]
 #[command(about = "Kinetix Virtual Machine & Compiler")]
 struct Cli {
     #[command(subcommand)]
@@ -385,8 +385,11 @@ fn run() -> Result<(), String> {
                 }
             }
 
+            let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
+                .map_err(|e| format!("Reactive Graph Error: {}", e))?;
+                
             let mut compiler = Compiler::new();
-            let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;
+            let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled())).map_err(|e| format!("Compilation error: {}", e))?;
             
             let mut vm = VM::new(compiled.clone());
             vm.run().map_err(|e| format!("Runtime error: {}", e))?;
@@ -459,8 +462,12 @@ fn run() -> Result<(), String> {
                 format_pipeline_error(&input, "Drop Order Verifier", vec![e])
             })?;
 
+            let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
+                .map_err(|e| format!("Reactive Graph Error: {}", e))?;
+
             let mut compiler = Compiler::new();
-            let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;
+            let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled()))
+                .map_err(|e| format!("Compilation error: {}", e))?;
 
             if native {
                 #[cfg(feature = "llvm")]
@@ -536,7 +543,7 @@ fn run() -> Result<(), String> {
             }
         }
         Commands::Version => {
-            println!("  Kinetix v0.0.6 (14)");
+            println!("  Kinetix v{} ({})", env!("CARGO_PKG_VERSION"), kinetix_kicomp::compiler::CURRENT_BUILD);
         }
         Commands::Shell => {
             run_shell();
@@ -622,9 +629,16 @@ fn run_test_file(path: &Path) -> Result<(), String> {
         return Err(format!("Parser errors: {:?}", parser.errors));
     }
 
-    // 2. Compiling
+    let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
+        .map_err(|errs| format!("Symbol errors: {:?}", errs))?;
+    let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+    let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+    let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
+        .map_err(|e| format!("Reactive Graph Error: {}", e))?;
+
     let mut compiler = Compiler::new();
-    let compiled = compiler.compile(&ast.statements).map_err(|e| format!("Compilation error: {}", e))?;
+    let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled()))
+        .map_err(|e| format!("Compilation error: {}", e))?;
 
     // 3. Running
     let mut vm = VM::new(compiled.clone());
@@ -795,7 +809,7 @@ fn run_shell() {
                     }
                 } else {
                     let mut compiler = Compiler::new();
-                    match compiler.compile(&ast.statements) {
+                    match compiler.compile(&ast.statements, None) {
                         Ok(compiled) => {
                             let mut vm = VM::new(compiled.clone());
                             if let Err(e) = vm.run() {
