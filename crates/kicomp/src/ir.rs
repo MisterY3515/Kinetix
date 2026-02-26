@@ -56,6 +56,16 @@ pub enum Opcode {
     /// Set global variable (name in const pool[A]) from register B
     SetGlobal = 43,
 
+    // Reactive Core
+    /// Set reactive state (name in const pool[A]) from register B
+    SetState = 44,
+    /// Init computed value (name in const pool[A]) from register B
+    InitComputed = 45,
+    /// Update existing reactive state (name in const pool[A]) with register B
+    UpdateState = 46,
+    /// Init reactive effect (dependencies array in A, closure in register B)
+    InitEffect = 47,
+
     // Object/Array
     /// Get member: A = B.const[C] (field name in constant pool)
     GetMember = 50,
@@ -201,12 +211,47 @@ impl CompiledFunction {
     }
 }
 
+/// Runtime metadata for a reactive node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ReactiveNodeKind {
+    State,
+    Computed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactiveNodeMetadata {
+    pub name: String,
+    pub kind: ReactiveNodeKind,
+    pub line: usize,
+}
+
+/// A serialized reactive dependency graph for the VM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledReactiveGraph {
+    pub nodes: std::collections::HashMap<String, ReactiveNodeMetadata>,
+    pub dependencies: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    pub dependents: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    pub update_order: Vec<String>,
+}
+
+impl CompiledReactiveGraph {
+    pub fn new() -> Self {
+        Self {
+            nodes: std::collections::HashMap::new(),
+            dependencies: std::collections::HashMap::new(),
+            dependents: std::collections::HashMap::new(),
+            update_order: vec![],
+        }
+    }
+}
+
 /// A compiled program: a list of functions + a top-level "main" chunk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledProgram {
     pub main: CompiledFunction,
     pub functions: Vec<CompiledFunction>,
     pub version: String,
+    pub reactive_graph: CompiledReactiveGraph,
 }
 
 impl CompiledProgram {
@@ -215,6 +260,7 @@ impl CompiledProgram {
             main: CompiledFunction::new("<main>".to_string(), 0),
             functions: vec![],
             version: "0.1.0".to_string(), // will be updated by compiler
+            reactive_graph: CompiledReactiveGraph::new(),
         }
     }
 }

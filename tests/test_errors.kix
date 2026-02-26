@@ -11,7 +11,7 @@ let d = "hello resource";
 let e = d; // 'd' is moved
 println(d); // ERROR: Use of uninitialized or moved variable 'd'
 
-// 3. Double Borrow (Not fully implemented yet, but for future Phase 1.x)
+// 3. Double Borrow (Not fully implemented yet)
 let mut f = 5;
 let ref1 = &mut f;
 // let ref2 = &mut f; // ERROR: Cannot borrow 'f' as mutable more than once at a time
@@ -19,7 +19,7 @@ let ref1 = &mut f;
 // 4. Undefined Variable
 // println(undefined_var); // ERROR: Undeclared variable: 'undefined_var'
 
-// 5. Invalid Option/Result Pattern Matching (future exhaustive check verification)
+// 5. Invalid Option/Result Pattern Matching (exhaustive check verification)
 let opt: Option<int> = Some(42);
 match opt {
     // Missing 'None' arm!
@@ -30,12 +30,12 @@ match opt {
 // Attempting to resolve generic types with no concrete substitution
 // println(); // Too few args, but if T was allowed to survive, validate_mono would catch it.
 
-// 7. StructLiteral syntax errors (Phase 3 Step 1 Validation)
+// 7. StructLiteral syntax errors
 // let broken_struct = Point { x: 10 y: 20 }; // ERROR: Expected comma or RBrace
 // let no_name = { x: 10 }; // ERROR: Expected name before LBrace
 // let no_brace = Point x: 10; // ERROR: Expected {
 
-// 8. Linear Struct Aggregation (Phase 3 Step 3 Validation)
+// 8. Linear Struct Aggregation
 // let my_str = "Im moved!";
 // let packet = Packet { msg: my_str };
 // println(my_str); // ERROR: Cannot copy from an uninitialized or moved variable 'my_str'

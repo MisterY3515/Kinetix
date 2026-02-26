@@ -9,6 +9,23 @@ pub enum Statement<'a> {
         value: Expression<'a>,
         line: usize,
     },
+    State {
+        name: String,
+        type_hint: Option<String>,
+        value: Expression<'a>,
+        line: usize,
+    },
+    Computed {
+        name: String,
+        type_hint: Option<String>,
+        value: Expression<'a>,
+        line: usize,
+    },
+    Effect {
+        dependencies: Vec<String>,
+        body: &'a Statement<'a>,
+        line: usize,
+    },
     Return {
         value: Option<Expression<'a>>,
         line: usize,

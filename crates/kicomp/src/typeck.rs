@@ -72,6 +72,13 @@ impl TypeContext {
                 // The Let's type must match the value's type
                 constraints.push(Constraint::new(stmt.ty.clone(), value.ty.clone(), stmt.line));
             }
+            HirStmtKind::State { value, .. } | HirStmtKind::Computed { value, .. } => {
+                self.collect_expr(value, stmt.line, constraints);
+                constraints.push(Constraint::new(stmt.ty.clone(), value.ty.clone(), stmt.line));
+            }
+            HirStmtKind::Effect { body, .. } => {
+                self.collect_stmt(body, constraints);
+            }
             HirStmtKind::Return { value } => {
                 if let Some(v) = value {
                     self.collect_expr(v, stmt.line, constraints);

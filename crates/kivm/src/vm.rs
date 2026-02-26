@@ -158,6 +158,10 @@ pub struct VM {
     call_stack: Vec<CallFrame>,
     globals: HashMap<String, Value>,
     pub output: Vec<String>,
+    
+    // Reactive Core Data
+    state_values: HashMap<String, Value>,
+    dirty_states: std::collections::HashSet<String>,
 }
 
 impl VM {
@@ -172,6 +176,8 @@ impl VM {
             call_stack: Vec::new(),
             globals,
             output: Vec::new(),
+            state_values: HashMap::new(),
+            dirty_states: std::collections::HashSet::new(),
         }
     }
 
@@ -180,43 +186,70 @@ impl VM {
     }
 
     pub fn run(&mut self) -> Result<(), String> {
-        let main_args = vec![];
-        let main_frame = CallFrame::new(self.program.main.clone(), main_args, None);
-        self.call_stack.push(main_frame);
+        let mut ticks = 0;
+        const MAX_TICKS: usize = 1000; // Prevent infinite reactive loops
 
+        // Tick loop (Frame Scheduler)
         loop {
-            if self.call_stack.is_empty() {
+            let main_args = vec![];
+            let main_frame = CallFrame::new(self.program.main.clone(), main_args, None);
+            self.call_stack.push(main_frame);
+            
+            // Clear dirty tracking for this frame
+            self.dirty_states.clear();
+
+            // Inner execution loop
+            loop {
+                if self.call_stack.is_empty() {
+                    break;
+                }
+                
+                let result = match self.step() {
+                    Ok(r) => r,
+                    Err(e) => return Err(self.runtime_error(&e)),
+                };
+                match result {
+                    StepResult::Continue => {},
+                    StepResult::Halt => break,
+                    StepResult::Return(val) => {
+                        let popped = self.call_stack.pop().expect("Stack underflow");
+                        if let Some(reg) = popped.return_to_reg {
+                            if let Some(parent) = self.call_stack.last_mut() {
+                                parent.set_reg(reg, val);
+                            }
+                        } else {
+                            // Main return -> break inner loop
+                            break;
+                        }
+                    },
+                    StepResult::Call(func, args, dest_reg) => {
+                         self.call_value(func, args, Some(dest_reg))?;
+                    },
+                    StepResult::TailCall(func, args) => {
+                        let popped = self.call_stack.pop().expect("Stack underflow");
+                        let ret_reg = popped.return_to_reg;
+                        self.call_value(func, args, ret_reg)?;
+                    }
+                }
+            } // end inner execution loop
+
+            // Frame finished. Check reactive topology.
+            if self.dirty_states.is_empty() {
+                // Stable state reached. Normal exit.
                 break;
             }
-            
-            let result = match self.step() {
-                Ok(r) => r,
-                Err(e) => return Err(self.runtime_error(&e)),
-            };
-            match result {
-                StepResult::Continue => {},
-                StepResult::Halt => break,
-                StepResult::Return(val) => {
-                    let popped = self.call_stack.pop().expect("Stack underflow");
-                    if let Some(reg) = popped.return_to_reg {
-                        if let Some(parent) = self.call_stack.last_mut() {
-                            parent.set_reg(reg, val);
-                        }
-                    } else {
-                        // Main return
-                        break;
-                    }
-                },
-                StepResult::Call(func, args, dest_reg) => {
-                     self.call_value(func, args, Some(dest_reg))?;
-                },
-                StepResult::TailCall(func, args) => {
-                    let popped = self.call_stack.pop().expect("Stack underflow");
-                    let ret_reg = popped.return_to_reg;
-                    self.call_value(func, args, ret_reg)?;
-                }
+
+            ticks += 1;
+            if ticks >= MAX_TICKS {
+                return Err("Runtime Error: Infinite reactive loop detected (Max ticks 1000 exceeded). Verify that state variables do not cyclically update each other.".into());
             }
+
+            // In Step 4 (MIR Caching) we will check the Dependency Graph here.
+            // For Step 3, the Tick loop simply re-evaluates the "frame" (Main) to 
+            // compute the new Derived nodes from the new State.
+            self.call_stack.clear(); // Ensure clean state before re-running
         }
+
         Ok(())
     }
 
@@ -378,6 +411,44 @@ impl VM {
                 };
                 let val = frame.reg(instr.b).clone();
                 self.globals.insert(name, val);
+            }
+            
+            Opcode::SetState => {
+                let name = match frame.get_constant(instr.a) {
+                    Constant::String(s) => s.clone(),
+                    _ => return Err("SetState: expected string constant".into()),
+                };
+                let current_eval_val = frame.reg(instr.b).clone();
+                
+                // Reactive update tracking logic
+                if let Some(existing_val) = self.state_values.get(&name) {
+                    // Tick > 0. Restore the persisted state value!
+                    // Overwrite the register with the source-of-truth from the previous tick, 
+                    // before it gets saved into the local/global slot by the subsequent Opcode.
+                    frame.set_reg(instr.b, existing_val.clone());
+                } else {
+                    // First time initialization
+                    self.state_values.insert(name.clone(), current_eval_val);
+                    self.dirty_states.insert(name);
+                }
+            }
+            Opcode::UpdateState => {
+                let name = match frame.get_constant(instr.a) {
+                    Constant::String(s) => s.clone(),
+                    _ => return Err("UpdateState: expected string constant".into()),
+                };
+                let val = frame.reg(instr.b).clone();
+                // User mutated the state explicitly. Track it to trigger next reactive tick.
+                self.state_values.insert(name.clone(), val);
+                self.dirty_states.insert(name);
+            }
+            Opcode::InitComputed => {
+                // Computed values are initialized in the main flow. 
+                // In Step 4 we will use this tag to conditionally skip re-computation using MIR versions.
+                // For now, it's a no-op marker that the VM ignores execution-wise.
+            }
+            Opcode::InitEffect => {
+                // Same as Computed, ignored by execution flow for now until reactive step is complete.
             }
             
             Opcode::SetMember => {

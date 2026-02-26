@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 16;
+pub const CURRENT_BUILD: i64 = 17;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
@@ -57,7 +57,15 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&mut self, statements: &[Statement<'_>]) -> Result<&CompiledProgram, String> {
+    pub fn compile(
+        &mut self,
+        statements: &[Statement<'_>],
+        reactive_graph: Option<crate::ir::CompiledReactiveGraph>,
+    ) -> Result<&CompiledProgram, String> {
+        if let Some(rg) = reactive_graph {
+            self.program.reactive_graph = rg;
+        }
+
         for stmt in statements {
             self.compile_statement(stmt)?;
             if let Some(scope) = self.scopes.last() {
@@ -133,11 +141,129 @@ impl Compiler {
             | Statement::Class { line, .. } | Statement::Struct { line, .. }
             | Statement::Enum { line, .. } | Statement::Trait { line, .. } | Statement::Impl { line, .. }
             | Statement::Break { line } | Statement::Continue { line }
-            | Statement::Version { line, .. } => {
+            | Statement::Version { line, .. }
+            | Statement::State { line, .. } | Statement::Computed { line, .. } | Statement::Effect { line, .. } => {
                 self.current_line = *line as u32;
             }
         }
         match stmt {
+            Statement::State { name, value, .. } => {
+                let reg = self.compile_expression(value)?;
+                let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
+                self.emit_instr(Instruction::ab(Opcode::SetState, name_idx, reg));
+                
+                if self.scopes.len() == 1 {
+                    self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
+                } else {
+                    let slot = self.current_scope_mut().define(name);
+                    if self.current_scope_mut().next_register > self.max_temp {
+                        self.max_temp = self.current_scope_mut().next_register; 
+                    }
+                    if slot != reg {
+                        self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, reg));
+                    }
+                }
+            }
+            Statement::Computed { name, value, .. } => {
+                let func_name = format!("$computed_{}", name);
+                
+                let saved_temp = self.next_temp;
+                let saved_max = self.max_temp;
+                let saved_main = std::mem::replace(&mut self.program.main, CompiledFunction::new(func_name.clone(), 0));
+                self.next_temp = 0;
+                self.max_temp = 0;
+                self.scopes.push(Scope::new(0));
+                
+                let ret_reg = self.compile_expression(value)?;
+                self.emit_instr(Instruction::a_only(Opcode::Return, ret_reg));
+                
+                self.scopes.pop();
+                
+                let mut compiled_func = std::mem::replace(&mut self.program.main, saved_main);
+                compiled_func.locals = self.max_temp;
+                self.next_temp = saved_temp;
+                self.max_temp = saved_max;
+                
+                let func_idx = self.program.functions.len();
+                self.program.functions.push(compiled_func);
+                
+                let closure_reg = self.alloc_register();
+                let idx_const = self.current_fn().add_constant(Constant::Function(func_idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, closure_reg, idx_const));
+                self.emit_instr(Instruction::ab(Opcode::MakeClosure, closure_reg, 0));
+                
+                let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
+                self.emit_instr(Instruction::ab(Opcode::InitComputed, name_idx, closure_reg));
+                
+                if self.scopes.len() == 1 {
+                    self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, closure_reg));
+                } else {
+                    let slot = self.current_scope_mut().define(name);
+                    if self.current_scope_mut().next_register > self.max_temp {
+                        self.max_temp = self.current_scope_mut().next_register; 
+                    }
+                    if slot != closure_reg {
+                        self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, closure_reg));
+                    }
+                }
+            }
+            Statement::Effect { dependencies, body, .. } => {
+                let func_name = format!("$effect_{}", self.program.functions.len());
+                
+                let saved_temp = self.next_temp;
+                let saved_max = self.max_temp;
+                let saved_main = std::mem::replace(&mut self.program.main, CompiledFunction::new(func_name, 0));
+                self.next_temp = 0;
+                self.max_temp = 0;
+                self.scopes.push(Scope::new(0));
+                
+                if let Statement::Block { statements, .. } = body {
+                    for s in statements {
+                        self.compile_statement(s)?;
+                        if let Some(scope) = self.scopes.last() {
+                            self.next_temp = scope.next_register;
+                        }
+                    }
+                } else {
+                    self.compile_statement(body)?;
+                }
+                
+                self.emit_instr(Instruction::a_only(Opcode::ReturnVoid, 0));
+                self.scopes.pop();
+                
+                let mut compiled_func = std::mem::replace(&mut self.program.main, saved_main);
+                compiled_func.locals = self.max_temp;
+                self.next_temp = saved_temp;
+                self.max_temp = saved_max;
+                
+                let func_idx = self.program.functions.len();
+                self.program.functions.push(compiled_func);
+                
+                let closure_reg = self.alloc_register();
+                let idx_const = self.current_fn().add_constant(Constant::Function(func_idx));
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, closure_reg, idx_const));
+                self.emit_instr(Instruction::ab(Opcode::MakeClosure, closure_reg, 0));
+                
+                let deps_reg = if dependencies.is_empty() {
+                    let r = self.alloc_register();
+                    self.emit_instr(Instruction::a_only(Opcode::LoadNull, r));
+                    r
+                } else {
+                    let base_reg = self.next_temp;
+                    for dep in dependencies {
+                        let r = self.alloc_register();
+                        let idx = self.current_fn().add_constant(Constant::String(dep.clone()));
+                        self.emit_instr(Instruction::ab(Opcode::LoadConst, r, idx));
+                    }
+                    let arr_reg = self.alloc_register();
+                    self.emit_instr(Instruction::ab(Opcode::MakeArray, base_reg, dependencies.len() as u16));
+                    // Reset temp registers used for dependency strings
+                    self.next_temp = base_reg + 1;
+                    arr_reg
+                };
+                
+                self.emit_instr(Instruction::ab(Opcode::InitEffect, deps_reg, closure_reg));
+            }
             Statement::Let { name, value, mutable: _, type_hint: _, .. } => {
                 let reg = self.compile_expression(value)?;
                 if self.scopes.len() == 1 {
@@ -219,6 +345,7 @@ impl Compiler {
                     eprintln!("Warning: Script requires build {}, but you are running build {}. Some features may not work.", build, CURRENT_BUILD);
                 }
             }
+
         }
         Ok(())
     }
@@ -425,8 +552,13 @@ impl Compiler {
             }
             Expression::Assign { target, value } => {
                 let val_reg = self.compile_expression(value)?;
+                
+                // Track if target is an Identifier (to check Reactive Graph)
+                let mut target_name = None;
+
                 match target {
                     Expression::Identifier(name) => {
+                        target_name = Some(name.clone());
                         if let Some(slot) = self.resolve_assign(name) {
                             self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, val_reg));
                         } else {
@@ -435,17 +567,29 @@ impl Compiler {
                         }
                     }
                     Expression::MemberAccess { object, member } => {
-                        let obj_reg = self.compile_expression(object)?; // Object moved if local!
-                        let name_idx = self.current_fn().add_constant(Constant::String(member.clone()));
-                        self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, name_idx, val_reg));
+                        let obj_reg = self.compile_expression(object)?;
+                        let member_idx = self.current_fn().add_constant(Constant::String(member.clone()));
+                        self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, member_idx, val_reg));
                     }
                     Expression::Index { left, index } => {
-                        let left_reg = self.compile_expression(left)?; // Array/Map moved if local!
+                        let obj_reg = self.compile_expression(left)?;
                         let idx_reg = self.compile_expression(index)?;
-                        self.emit_instr(Instruction::new(Opcode::SetIndex, left_reg, idx_reg, val_reg));
+                        self.emit_instr(Instruction::new(Opcode::SetIndex, obj_reg, idx_reg, val_reg));
                     }
-                    _ => return Err("Invalid assignment target".to_string()),
+                    _ => return Err("Invalid assignment target".into()),
                 }
+
+                // --- REACTIVE STATE TRACKING ---
+                // If the user manually mutates a known State, tell the VM so it can tick
+                if let Some(name) = target_name {
+                    if let Some(node) = self.program.reactive_graph.nodes.get(&name) {
+                        if matches!(node.kind, crate::ir::ReactiveNodeKind::State) {
+                            let name_idx = self.current_fn().add_constant(Constant::String(name));
+                            self.emit_instr(Instruction::ab(Opcode::UpdateState, name_idx, val_reg));
+                        }
+                    }
+                }
+
                 Ok(val_reg)
             }
             Expression::Call { function, arguments } => {

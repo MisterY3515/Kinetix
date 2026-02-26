@@ -163,6 +163,9 @@ fn resolve_statement<'a>(stmt: &Statement<'a>, table: &mut SymbolTable, errors: 
         Statement::Version { line, .. } => *line,
         Statement::Break { line } => *line,
         Statement::Continue { line } => *line,
+        Statement::State { line, .. } => *line,
+        Statement::Computed { line, .. } => *line,
+        Statement::Effect { line, .. } => *line,
     };
 
     match stmt {
@@ -173,6 +176,9 @@ fn resolve_statement<'a>(stmt: &Statement<'a>, table: &mut SymbolTable, errors: 
                 None => table.fresh_var(), // unique inference variable
             };
             table.define(name, ty, *mutable);
+        }
+        Statement::Effect { body, .. } => {
+            resolve_statement(body, table, errors);
         }
         Statement::Function { parameters, body, .. } => {
             table.enter_scope();
@@ -213,6 +219,22 @@ fn resolve_statement<'a>(stmt: &Statement<'a>, table: &mut SymbolTable, errors: 
             for m in methods {
                 resolve_statement(m, table, errors);
             }
+        }
+        Statement::State { name, value, type_hint, .. } => {
+            resolve_expression(value, table, errors, line);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => table.fresh_var(),
+            };
+            table.define(name, ty, true); // state vars are implicitly mutable
+        }
+        Statement::Computed { name, value, type_hint, .. } => {
+            resolve_expression(value, table, errors, line);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => table.fresh_var(),
+            };
+            table.define(name, ty, false); // computed vars are immutable
         }
         _ => {} // Include, Version, Break, Continue, Struct — no refs to resolve
     }

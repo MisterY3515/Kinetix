@@ -52,11 +52,25 @@ let arr = [10, 20, 30]
 
 println("=== Testing Generics (Option) ===")
 // Note: Enum, Trait, Try and Match are implemented in the compiler frontend (AST -> Typeck -> Borrowck).
-// VM Bytecode runtime emission for these features is planned for Phase 3+.
+// VM Bytecode runtime emission for these features is planned.
 
-println("=== Testing Linear Structs (Phase 3 AST Parsing) ===")
+println("=== Testing Linear Structs (AST Parsing) ===")
 let my_struct = DataPacket { id: 101, valid: true }
-// Note: Backend struct allocation is pending Step 6. 
+// Note: Backend struct allocation is pending.
 // If this compiles to HIR without crashing, the Parser and Type Normalization updates are successful.
+
+println("=== Testing Reactive State ===")
+state counter = 0
+// State variables are implicitly mutable and tracked by the reactive engine.
+
+println("=== Testing Reactive Computed ===")
+computed doubled = counter * 2
+// Computed values are compiled as anonymous closure functions for lazy re-evaluation.
+
+println("=== Testing Reactive Effect ===")
+effect [counter] {
+    println("Counter changed!")
+}
+// Effect bodies are compiled as thunk closures with explicit dependency tracking.
 
 println("=== All Tests Passed Successfully! ===")

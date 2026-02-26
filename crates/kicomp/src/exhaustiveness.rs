@@ -81,8 +81,11 @@ fn check_statement(
 ) -> Result<(), String> {
     use crate::hir::HirStmtKind;
     match &stmt.kind {
-        HirStmtKind::Let { value, .. } | HirStmtKind::Return { value: Some(value) } => {
+        HirStmtKind::Let { value, .. } | HirStmtKind::Return { value: Some(value) } | HirStmtKind::State { value, .. } | HirStmtKind::Computed { value, .. } => {
             check_expression(value, symbols, sub)?;
+        }
+        HirStmtKind::Effect { body, .. } => {
+            check_statement(body, symbols, sub)?;
         }
         HirStmtKind::Expression { expression } => {
             check_expression(expression, symbols, sub)?;

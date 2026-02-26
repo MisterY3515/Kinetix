@@ -53,6 +53,12 @@ fn normalize_stmt(stmt: &mut HirStatement) -> Result<(), String> {
             normalize_stmt(body)?;
         }
         HirStmtKind::Break | HirStmtKind::Continue => {}
+        HirStmtKind::State { value, .. } | HirStmtKind::Computed { value, .. } => {
+            normalize_expr(value)?;
+        }
+        HirStmtKind::Effect { body, .. } => {
+            normalize_stmt(body)?;
+        }
     }
     Ok(())
 }

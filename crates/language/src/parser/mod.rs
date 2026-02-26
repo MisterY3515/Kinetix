@@ -61,6 +61,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         match self.cur_token {
             Token::Let => self.parse_let_statement(false),
             Token::Mut => self.parse_let_statement(true),
+            Token::State => self.parse_state_statement(),
+            Token::Computed => self.parse_computed_statement(),
+            Token::Effect => self.parse_effect_statement(),
             Token::Fn => self.parse_fn_statement(),
             Token::Return => self.parse_return_statement(),
             Token::While => self.parse_while_statement(),
@@ -141,6 +144,116 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 None
             }
         }
+    }
+
+    fn parse_state_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        match &self.peek_token {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.next_token(); 
+
+                // Optional type annotation: state x: int = ...
+                let mut type_hint = None;
+                if self.peek_token == Token::Colon {
+                    self.next_token(); // consume :
+                    self.next_token(); // consume type
+                    if let Token::Identifier(t) = &self.cur_token {
+                        type_hint = Some(t.clone());
+                    }
+                }
+
+                if !self.expect_peek(Token::Equal) {
+                    return None;
+                }
+                
+                self.next_token();
+                
+                let value = self.parse_expression(Precedence::Lowest)?;
+                
+                if self.peek_token == Token::Semicolon {
+                    self.next_token();
+                }
+                
+                Some(Statement::State { name, type_hint, value, line: start_line })
+            }
+            _ => {
+                self.peek_error(Token::Identifier("name".to_string()));
+                None
+            }
+        }
+    }
+
+    fn parse_computed_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        match &self.peek_token {
+            Token::Identifier(name) => {
+                let name = name.clone();
+                self.next_token(); 
+
+                // Optional type annotation: computed x: int = ...
+                let mut type_hint = None;
+                if self.peek_token == Token::Colon {
+                    self.next_token(); // consume :
+                    self.next_token(); // consume type
+                    if let Token::Identifier(t) = &self.cur_token {
+                        type_hint = Some(t.clone());
+                    }
+                }
+
+                if !self.expect_peek(Token::Equal) {
+                    return None;
+                }
+                
+                self.next_token();
+                
+                let value = self.parse_expression(Precedence::Lowest)?;
+                
+                if self.peek_token == Token::Semicolon {
+                    self.next_token();
+                }
+                
+                Some(Statement::Computed { name, type_hint, value, line: start_line })
+            }
+            _ => {
+                self.peek_error(Token::Identifier("name".to_string()));
+                None
+            }
+        }
+    }
+
+    fn parse_effect_statement(&mut self) -> Option<Statement<'arena>> {
+        let start_line = self.lexer.line;
+        
+        let mut dependencies = Vec::new();
+        if self.peek_token == Token::LParen {
+            self.next_token(); // move to (
+            self.next_token(); // move inside
+            while self.cur_token != Token::RParen && self.cur_token != Token::EOF {
+                if let Token::Identifier(dep) = &self.cur_token {
+                    dependencies.push(dep.clone());
+                } else {
+                    self.push_error(format!("Expected identifier in effect dependencies, got {:?}", self.cur_token));
+                    return None;
+                }
+                self.next_token();
+                if self.cur_token == Token::Comma {
+                    self.next_token();
+                }
+            }
+        }
+        
+        if !self.expect_peek(Token::LBrace) {
+            return None;
+        }
+        
+        let body = self.parse_block_statement()?;
+        
+        if self.peek_token == Token::Semicolon {
+            self.next_token();
+        }
+        
+        Some(Statement::Effect { dependencies, body: self.arena.alloc(body), line: start_line })
     }
 
     // --- Function Declaration (statement) ---
