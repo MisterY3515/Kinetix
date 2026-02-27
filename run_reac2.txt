@@ -1,7 +1,0 @@
-
-  Runtime error: Runtime Error: Infinite reactive loop detected (Max ticks 1000 exceeded). Verify that state variables do not cyclically update each other.
-
-error[E0000]: aborting due to previous error(s)
-  Kinetix v0.0.7 (Dev)
-  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
-

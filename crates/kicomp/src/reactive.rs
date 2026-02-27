@@ -175,6 +175,9 @@ fn collect_reactive_nodes<'a>(
                     collect_reactive_nodes(inner, nodes, computed_exprs);
                 }
             }
+            HirStmtKind::Class { methods, .. } => {
+                collect_reactive_nodes(methods, nodes, computed_exprs);
+            }
             _ => {}
         }
     }
@@ -208,6 +211,12 @@ fn collect_identifier_refs(
         }
         HirExprKind::Call { function, arguments } => {
             collect_identifier_refs(function, state_names, refs);
+            for arg in arguments {
+                collect_identifier_refs(arg, state_names, refs);
+            }
+        }
+        HirExprKind::MethodCall { object, arguments, .. } => {
+            collect_identifier_refs(object, state_names, refs);
             for arg in arguments {
                 collect_identifier_refs(arg, state_names, refs);
             }
@@ -291,6 +300,11 @@ fn collect_stmt_refs(
         }
         HirStmtKind::Function { body, .. } => {
             collect_stmt_refs(body, state_names, refs);
+        }
+        HirStmtKind::Class { methods, .. } => {
+            for m in methods {
+                collect_stmt_refs(m, state_names, refs);
+            }
         }
         HirStmtKind::Break | HirStmtKind::Continue => {}
     }

@@ -98,6 +98,11 @@ fn check_statement(
         HirStmtKind::Function { body, .. } => {
             check_statement(body, symbols, sub)?;
         }
+        HirStmtKind::Class { methods, .. } => {
+            for m in methods {
+                check_statement(m, symbols, sub)?;
+            }
+        }
         HirStmtKind::While { condition, body } => {
             check_expression(condition, symbols, sub)?;
             check_statement(body, symbols, sub)?;
@@ -142,6 +147,12 @@ fn check_expression(
         }
         HirExprKind::Call { function, arguments } => {
             check_expression(function, symbols, sub)?;
+            for arg in arguments {
+                check_expression(arg, symbols, sub)?;
+            }
+        }
+        HirExprKind::MethodCall { object, arguments, .. } => {
+            check_expression(object, symbols, sub)?;
             for arg in arguments {
                 check_expression(arg, symbols, sub)?;
             }

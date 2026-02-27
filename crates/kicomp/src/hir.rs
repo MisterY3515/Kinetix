@@ -64,6 +64,10 @@ pub enum HirStmtKind {
     Block {
         statements: Vec<HirStatement>,
     },
+    Class {
+        name: String,
+        methods: Vec<HirStatement>,
+    },
     Function {
         name: String,
         parameters: Vec<(String, Type)>,
@@ -139,6 +143,11 @@ pub enum HirExprKind {
     Index {
         left: Box<HirExpression>,
         index: Box<HirExpression>,
+    },
+    MethodCall {
+        object: Box<HirExpression>,
+        method: String,
+        arguments: Vec<HirExpression>,
     },
     MemberAccess {
         object: Box<HirExpression>,
@@ -282,6 +291,16 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &cra
             HirStatement {
                 kind: HirStmtKind::Function { name: name.clone(), parameters: params, body: hir_body, return_type: ret.clone() },
                 ty: Type::Void, // function definitions don't produce a value
+                line,
+            }
+        }
+        Statement::Class { name, methods, .. } => {
+            let hir_methods: Vec<HirStatement> = methods.iter()
+                .map(|m| lower_statement(m, symbols, traits, fresh, env))
+                .collect();
+            HirStatement {
+                kind: HirStmtKind::Class { name: name.clone(), methods: hir_methods },
+                ty: Type::Void,
                 line,
             }
         }
@@ -451,6 +470,18 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
             }
         }
         Expression::Call { function, arguments } => {
+            if let Expression::MemberAccess { object, member } = &**function {
+                let obj = lower_expression(object, symbols, traits, fresh, env);
+                let args: Vec<HirExpression> = arguments.iter()
+                    .map(|a| lower_expression(a, symbols, traits, fresh, env))
+                    .collect();
+                let ty = fresh.fresh();
+                return HirExpression {
+                    kind: HirExprKind::MethodCall { object: Box::new(obj), method: member.clone(), arguments: args },
+                    ty,
+                };
+            }
+
             let func = lower_expression(function, symbols, traits, fresh, env);
             let args: Vec<HirExpression> = arguments.iter()
                 .map(|a| lower_expression(a, symbols, traits, fresh, env))

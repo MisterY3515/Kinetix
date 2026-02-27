@@ -1,5 +1,0 @@
-error: unexpected argument '--run' found
-
-Usage: kivm.exe compile [OPTIONS] --input <INPUT>
-
-For more information, try '--help'.
