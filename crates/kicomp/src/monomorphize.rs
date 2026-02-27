@@ -21,8 +21,6 @@ pub fn monomorphize(program: &MirProgram) -> Result<MirProgram, String> {
 struct MonoContext<'a> {
     original: &'a MirProgram,
     concerte_funcs: Vec<MirFunction>,
-    /// Map from (GenericObjectName, StringifiedGenericArgs) to Mangled Concretized Name
-    instantiations: HashMap<(String, String), String>,
     worklist: Vec<(String, Vec<Type>)>, 
 }
 
@@ -31,7 +29,6 @@ impl<'a> MonoContext<'a> {
         Self {
             original,
             concerte_funcs: Vec::new(),
-            instantiations: HashMap::new(),
             worklist: Vec::new(),
         }
     }

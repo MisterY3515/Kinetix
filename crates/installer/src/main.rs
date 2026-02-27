@@ -37,7 +37,6 @@ fn kicomp_filename() -> &'static str {
 
 // ─── Theme ─────────────────────────────────────────────────────────────────
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(108, 99, 255);
-const ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(130, 122, 255);
 const ACCENT_DIM: egui::Color32 = egui::Color32::from_rgb(78, 71, 200);
 const BG_DARK: egui::Color32 = egui::Color32::from_rgb(18, 18, 30);
 const BG_PANEL: egui::Color32 = egui::Color32::from_rgb(26, 26, 46);
@@ -210,6 +209,7 @@ impl InstallerApp {
 
     fn install(&mut self) {
         let total = STEP_NAMES.len();
+        #[allow(unused_assignments)]
         let mut current_step = 0;
 
         macro_rules! step {
@@ -303,7 +303,7 @@ impl InstallerApp {
         step!("Install Icon", {
             let icon_path = self.install_path.join("assets").join("KiFile.png");
             self.log(format!("Writing icon to {:?}", icon_path));
-            fs::write(&icon_path, ICON_BYTES)
+            let _ = fs::write(&icon_path, ICON_BYTES);
         });
 
         // Step 4: Configure PATH
