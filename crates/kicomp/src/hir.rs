@@ -198,19 +198,29 @@ fn get_line(stmt: &Statement) -> usize {
 fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &crate::trait_solver::TraitEnvironment, fresh: &mut FreshCounter, env: &mut std::collections::HashMap<String, Type>) -> HirStatement {
     let line = get_line(stmt);
     match stmt {
-        Statement::State { name, type_hint: _, value, .. } => {
+        Statement::State { name, type_hint, value, .. } => {
             let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => fresh.fresh(),
+            };
+            env.insert(name.clone(), ty.clone());
             HirStatement {
                 kind: HirStmtKind::State { name: name.clone(), value: hir_val },
-                ty: Type::Void,
+                ty,
                 line,
             }
         }
-        Statement::Computed { name, type_hint: _, value, .. } => {
+        Statement::Computed { name, type_hint, value, .. } => {
             let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => fresh.fresh(),
+            };
+            env.insert(name.clone(), ty.clone());
             HirStatement {
                 kind: HirStmtKind::Computed { name: name.clone(), value: hir_val },
-                ty: Type::Void,
+                ty,
                 line,
             }
         }

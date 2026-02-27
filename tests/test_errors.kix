@@ -12,7 +12,7 @@ let e = d; // 'd' is moved
 println(d); // ERROR: Use of uninitialized or moved variable 'd'
 
 // 3. Double Borrow (Not fully implemented yet)
-let mut f = 5;
+mut f = 5;
 let ref1 = &mut f;
 // let ref2 = &mut f; // ERROR: Cannot borrow 'f' as mutable more than once at a time
 
@@ -20,10 +20,10 @@ let ref1 = &mut f;
 // println(undefined_var); // ERROR: Undeclared variable: 'undefined_var'
 
 // 5. Invalid Option/Result Pattern Matching (exhaustive check verification)
-let opt: Option<int> = Some(42);
+let opt = Some(42);
 match opt {
     // Missing 'None' arm!
-    Some(val) => { println(val); }
+    Some(val) => println(val)
 } // ERROR (will be added when match exhaustiveness is strict)
 
 // 6. Generic Type Parameter Survival (Regression from Build 15)
