@@ -631,7 +631,7 @@ fn run_test_file(path: &Path) -> Result<(), String> {
 
     let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
         .map_err(|errs| format!("Symbol errors: {:?}", errs))?;
-    let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+    let traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
     let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
     let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
         .map_err(|e| format!("Reactive Graph Error: {}", e))?;

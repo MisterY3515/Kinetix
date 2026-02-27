@@ -217,7 +217,7 @@ impl InstallerApp {
                 let name = $name;
                 self.log(format!("Starting step: {}", name));
                 self.state = InstallState::Installing { step: current_step, total };
-                current_step += 1;
+                #[allow(unused_assignments)] { current_step += 1; }
                 match (|| -> std::io::Result<()> { $body; Ok(()) })() {
                     Ok(_) => {
                         self.log(format!("✓ Step complete: {}", name));
