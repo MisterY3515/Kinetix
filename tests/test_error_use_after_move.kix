@@ -1,0 +1,5 @@
+// test_error_use_after_move.kix
+// Verifies: Borrow Checker catches use-after-move errors
+let d = "hello resource";
+let e = d; // 'd' is moved
+println(d); // ERROR: Use of uninitialized or moved variable 'd'

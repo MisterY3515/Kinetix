@@ -1,0 +1,5 @@
+// test_error_double_borrow.kix
+// Verifies: Borrow Checker catches double mutable borrow
+mut f = 5;
+let ref1 = &mut f;
+let ref2 = &mut f; // ERROR: Cannot borrow 'f' as mutable more than once at a time

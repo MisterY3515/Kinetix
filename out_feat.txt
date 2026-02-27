@@ -1,0 +1,10 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running `target\debug\kivm.exe run tests\test_features.kix`
+
+  'tests\test_features.kix' is a source file. Use 'kivm compile --run tests\test_features.kix' instead.
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.7 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
+error: process didn't exit successfully: `target\debug\kivm.exe run tests\test_features.kix` (exit code: 1)

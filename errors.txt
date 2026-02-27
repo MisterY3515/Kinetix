@@ -1,0 +1,35 @@
+
+tests\test_errors.kix:
+error: Expected next token to be Equal, got Less instead
+  --> tests\test_errors.kix:23
+   |
+23 | let opt: Option<int> = Some(42);
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: No prefix parse function for Less
+  --> tests\test_errors.kix:23
+   |
+23 | let opt: Option<int> = Some(42);
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: No prefix parse function for Equal
+  --> tests\test_errors.kix:23
+   |
+23 | let opt: Option<int> = Some(42);
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: No prefix parse function for LBrace
+  --> tests\test_errors.kix:26
+   |
+26 |     Some(val) => { println(val); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: No prefix parse function for RBrace
+  --> tests\test_errors.kix:27
+   |
+27 | } // ERROR (will be added when match exhaustiveness is strict)
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: No prefix parse function for RBrace
+  --> tests\test_errors.kix:42
+  6 error(s) in Parser
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.7 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
