@@ -260,6 +260,11 @@ impl<'a> MirBuilder<'a> {
                 // Also pull up any deeply nested functions
                 self.functions.extend(sub_builder.functions);
             }
+            HirStmtKind::Class { methods, .. } => {
+                for m in methods {
+                    self.lower_statement(m);
+                }
+            }
             // For Build 10, we'll implement a subset (Let, Expr, Block).
             // Loops and Ifs will be expanded as needed.
             _ => {}
@@ -330,6 +335,9 @@ impl<'a> MirBuilder<'a> {
                     .map(|(_, e)| self.lower_expression_to_operand(e))
                     .collect();
                 RValue::Aggregate(name.clone(), ops)
+            }
+            HirExprKind::MethodCall { .. } => {
+                unreachable!("MethodCall should have been statically dispatched to Call in Type Normalizer.");
             }
             _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for Match, MemberAccess, etc.
         }
