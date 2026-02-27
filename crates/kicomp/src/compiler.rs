@@ -333,7 +333,17 @@ impl Compiler {
             Statement::Include { .. } => {
                 // Includes resolved at higher level
             }
-            Statement::Class { .. } | Statement::Struct { .. } 
+            Statement::Class { name: class_name, methods, .. } => {
+                for method in methods {
+                    if let Statement::Function { name: method_name, parameters, body, .. } = method {
+                        let mut new_params = vec![("self".to_string(), "Object".to_string())];
+                        new_params.extend_from_slice(parameters); // copy the rest
+                        let flat_name = format!("{}::{}", class_name, method_name);
+                        self.compile_function(&flat_name, &new_params, body)?;
+                    }
+                }
+            }
+            Statement::Struct { .. } 
             | Statement::Enum { .. } | Statement::Trait { .. } | Statement::Impl { .. } => {
                 // Deferred to M4 / Phase 2
             }
@@ -493,13 +503,23 @@ impl Compiler {
                 self.emit_instr(Instruction::a_only(opcode, reg));
                 Ok(reg)
             }
-            Expression::StructLiteral { .. } => {
-                // Return a dummy register (Null) instead of aborting the compilation.
-                // The VM does not fully support structs yet (Phase 3 Backend target),
-                // but this allows typechecking and MIR borrow checking to proceed.
-                let reg = self.alloc_register();
-                self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
-                Ok(reg)
+            Expression::StructLiteral { name, fields, .. } => {
+                let obj_reg = self.alloc_register();
+                self.emit_instr(Instruction::ab(Opcode::MakeMap, obj_reg, 0));
+                
+                // Add __class__ hidden field
+                let class_key_idx = self.current_fn().add_constant(Constant::String("__class__".to_string()));
+                let class_val_idx = self.current_fn().add_constant(Constant::String(name.clone()));
+                let class_val_reg = self.alloc_register();
+                self.emit_instr(Instruction::ab(Opcode::LoadConst, class_val_reg, class_val_idx));
+                self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, class_key_idx, class_val_reg));
+
+                for (fname, expr) in fields {
+                    let val_reg = self.compile_expression(expr)?;
+                    let name_idx = self.current_fn().add_constant(Constant::String(fname.clone()));
+                    self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, name_idx, val_reg));
+                }
+                Ok(obj_reg)
             }
             Expression::Null => {
                 let reg = self.alloc_register();
@@ -604,9 +624,23 @@ impl Compiler {
                     }
                 }
 
-                // Module builtin: module.function(args) → flatten to "Module.function" builtin call
+                // Module builtins vs Method calling on Instance
                 if let Expression::MemberAccess { object, member } = *function {
-                    if let Expression::Identifier(module_name) = *object {
+                    let mut is_local_obj = false;
+                    if let Expression::Identifier(name) = &**object {
+                        let is_capitalized = name.chars().next().unwrap_or('a').is_uppercase();
+                        if self.resolve_use(name)?.is_some() || self.program.reactive_graph.nodes.contains_key(name) {
+                            is_local_obj = true;
+                        } else if !is_capitalized {
+                            // Se è minucolo ed è globale (es. 'let p = Point...; p.greet()'), NON è un module
+                            is_local_obj = true;
+                        }
+                    } else {
+                        is_local_obj = true; // e.g. get_obj().method()
+                    }
+
+                    if !is_local_obj {
+                        let Expression::Identifier(module_name) = &**object else { unreachable!() };
                         let mut chars = module_name.chars();
                         let cap_module = match chars.next() {
                             None => String::new(),
@@ -616,6 +650,25 @@ impl Compiler {
                         let call_reg = self.alloc_register();
                         let name_idx = self.current_fn().add_constant(Constant::String(flat_name));
                         self.emit_instr(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
+                        for (i, arg) in arguments.iter().enumerate() {
+                            let expected_reg = call_reg + 1 + i as u16;
+                            let arg_reg = self.compile_expression(arg)?;
+                            if arg_reg != expected_reg {
+                                while self.next_temp <= expected_reg {
+                                    self.alloc_register();
+                                }
+                                self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                            }
+                        }
+                        self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+                        return Ok(call_reg);
+                    } else {
+                        // OOP Method Call
+                        let obj_reg = self.compile_expression(object)?;
+                        let method_idx = self.current_fn().add_constant(Constant::String(member.clone()));
+                        let call_reg = self.alloc_register();
+                        self.emit_instr(Instruction::new(Opcode::LoadMethod, call_reg, obj_reg, method_idx));
+                        
                         for (i, arg) in arguments.iter().enumerate() {
                             let expected_reg = call_reg + 1 + i as u16;
                             let arg_reg = self.compile_expression(arg)?;

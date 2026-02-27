@@ -559,6 +559,32 @@ impl VM {
                 return Ok(StepResult::TailCall(func_val, args));
             }
 
+            Opcode::LoadMethod => {
+                let obj = frame.reg(instr.b).clone();
+                let method_name = match frame.get_constant(instr.c) {
+                    Constant::String(s) => s.clone(),
+                    _ => return Err("LoadMethod: expected string method name".into()),
+                };
+
+                let class_name = match &obj {
+                    Value::Map(map) => {
+                        match map.get("__class__") {
+                            Some(Value::Str(c)) => c.clone(),
+                            _ => return Err("LoadMethod: object is a map but has no __class__ field".into()),
+                        }
+                    }
+                    _ => return Err("LoadMethod: object is not a class instance".into()),
+                };
+
+                // In Kinetix, methods are compiled as "ClassName::methodName"
+                let flat_name = format!("{}::{}", class_name, method_name);
+                if let Some(func_val) = self.globals.get(&flat_name) {
+                    frame.set_reg(instr.a, Value::BoundMethod(Box::new(obj.clone()), Box::new(func_val.clone())));
+                } else {
+                    return Err(format!("Method '{}' not found on class '{}'", method_name, class_name));
+                }
+            }
+
             Opcode::Return => {
                 let val = frame.reg(instr.a).clone();
                 return Ok(StepResult::Return(val));

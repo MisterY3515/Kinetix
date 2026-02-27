@@ -1,0 +1,7 @@
+
+  Runtime error: Cannot call Str('P.greet') (not expecting a native function)
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.7 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+

@@ -106,6 +106,8 @@ pub enum Opcode {
     MakeClosure = 73,
     /// Tail Call: Reuse current frame for recursive call
     TailCall = 74,
+    /// Load method: A = BoundMethod(object: B, method_name_idx: C)
+    LoadMethod = 75,
 
     // Built-in operations
     /// Print register A
