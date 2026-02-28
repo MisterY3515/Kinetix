@@ -293,24 +293,36 @@ fn resolve_expr(expr: &mut HirExpression, symbols: &SymbolTable, sub: &Substitut
                         unreachable!()
                     };
 
-                    if struct_def.methods.contains_key(&method_name) {
+                    if let Some(method_type) = struct_def.methods.get(&method_name) {
+                        let mut takes_mut_ref = false;
+                        if let Type::Fn(params, _) = method_type {
+                            if let Some(first_param_ty) = params.first() {
+                                takes_mut_ref = matches!(first_param_ty, Type::MutRef(_));
+                            }
+                        }
+
                         let fully_qualified_name = format!("{}::{}", class_name, method_name);
 
                         let mut temp_kind = HirExprKind::Null;
                         std::mem::swap(&mut expr.kind, &mut temp_kind);
 
                         if let HirExprKind::MethodCall { object: extracted_obj, arguments: mut ext_args, .. } = temp_kind {
-                            let self_type = Type::MutRef(Box::new(extracted_obj.ty.clone()));
+                            let mut new_args = Vec::new();
 
-                            let mut new_args = vec![
-                                crate::hir::HirExpression {
+                            if takes_mut_ref {
+                                let self_type = Type::MutRef(Box::new(extracted_obj.ty.clone()));
+                                new_args.push(crate::hir::HirExpression {
                                     kind: HirExprKind::Prefix {
                                         operator: "&mut".to_string(),
                                         right: Box::new(*extracted_obj),
                                     },
                                     ty: self_type,
-                                }
-                            ];
+                                });
+                            } else {
+                                // Consuming method: passes `self` by value (Move)
+                                new_args.push(*extracted_obj);
+                            }
+
                             new_args.append(&mut ext_args);
 
                             expr.kind = HirExprKind::Call {
