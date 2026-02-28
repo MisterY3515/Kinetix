@@ -18,10 +18,13 @@ pub fn monomorphize(program: &MirProgram) -> Result<MirProgram, String> {
     Ok(ctx.build())
 }
 
+const MAX_INSTANTIATIONS: usize = 2048;
+
 struct MonoContext<'a> {
     original: &'a MirProgram,
     concerte_funcs: Vec<MirFunction>,
     worklist: Vec<(String, Vec<Type>)>, 
+    instantiation_count: usize,
 }
 
 impl<'a> MonoContext<'a> {
@@ -30,6 +33,7 @@ impl<'a> MonoContext<'a> {
             original,
             concerte_funcs: Vec::new(),
             worklist: Vec::new(),
+            instantiation_count: 0,
         }
     }
 
@@ -41,6 +45,11 @@ impl<'a> MonoContext<'a> {
 
         // Process any generically instantiated functions pulled into the worklist
         while let Some((func_name, generic_args)) = self.worklist.pop() {
+            self.instantiation_count += 1;
+            if self.instantiation_count > MAX_INSTANTIATIONS {
+                return Err(format!("Monomorphization Guard Triggered: Generic instantiation limit exceeded (max = {})", MAX_INSTANTIATIONS));
+            }
+
             let mangled_name = mangle_name(&func_name, &generic_args);
             
             // Check if we already instantiated this specific concrete version

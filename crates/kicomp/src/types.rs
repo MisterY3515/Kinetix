@@ -7,7 +7,7 @@ use std::fmt;
 pub type TypeVarId = u32;
 
 /// The core type representation for Kinetix.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     /// Primitive types
     Int,
