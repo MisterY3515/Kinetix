@@ -6,7 +6,7 @@ use clap::Parser;
 use std::fs;
 use bumpalo::Bump;
 use lexer::Lexer;
-use parser::Parser as NevharParser; // Avoid name collision
+use parser::Parser as KinetixParser; // Avoid name collision
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -23,7 +23,7 @@ fn main() {
             Ok(content) => {
                 let arena = Bump::new();
                 let l = Lexer::new(&content);
-                let mut p = NevharParser::new(l, &arena);
+                let mut p = KinetixParser::new(l, &arena);
                 let program = p.parse_program();
                 
                 println!("Parsed Program: {:?}", program);
@@ -38,7 +38,7 @@ fn main() {
             Err(e) => eprintln!("Error reading file: {}", e),
         }
     } else {
-        println!("Nevhar Parser Test");
+        println!("Kinetix Parser Test");
     }
 }
 

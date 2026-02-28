@@ -1,9 +1,0 @@
-    Checking kinetix-kicomp v0.0.7 (D:\Progetti\Nevhar\Kinetix\crates\kicomp)
-error[E0609]: no field `kind` on type `&Type`
-   --> crates\kicomp\src\type_normalize.rs:298:88
-    |
-298 |                         if let HirStmtKind::Function { parameters, .. } = &method_stmt.kind {
-    |                                                                                        ^^^^ unknown field
-
-For more information about this error, try `rustc --explain E0609`.
-error: could not compile `kinetix-kicomp` (lib) due to 1 previous error
