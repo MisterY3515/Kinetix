@@ -370,6 +370,11 @@ fn run() -> Result<(), String> {
                 format_pipeline_error(&file, "Sandbox Audit Pass", msgs)
             })?;
 
+            // Build 20: HIR Integrity Validation Pass
+            kinetix_kicomp::hir_validate::validate(&hir).map_err(|errs| {
+                format_pipeline_error(&file, "HIR Integrity", errs)
+            })?;
+
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&file, "Borrow Checker", errs)
@@ -385,6 +390,11 @@ fn run() -> Result<(), String> {
 
             kinetix_kicomp::drop_verify::verify(&mir).map_err(|e| {
                 format_pipeline_error(&file, "Drop Order Verifier", vec![e])
+            })?;
+
+            // Build 20: MIR/SSA Integrity Validation Pass
+            kinetix_kicomp::ssa_validate::validate(&mir).map_err(|e| {
+                format_pipeline_error(&file, "MIR Integrity", vec![e])
             })?;
 
             #[cfg(feature = "llvm")]
@@ -480,6 +490,11 @@ fn run() -> Result<(), String> {
                 format_pipeline_error(&input, "Sandbox Audit Pass", msgs)
             })?;
 
+            // Build 20: HIR Integrity Validation Pass
+            kinetix_kicomp::hir_validate::validate(&hir).map_err(|errs| {
+                format_pipeline_error(&input, "HIR Integrity", errs)
+            })?;
+
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&input, "Borrow Checker", errs)
@@ -495,6 +510,11 @@ fn run() -> Result<(), String> {
 
             kinetix_kicomp::drop_verify::verify(&mir).map_err(|e| {
                 format_pipeline_error(&input, "Drop Order Verifier", vec![e])
+            })?;
+
+            // Build 20: MIR/SSA Integrity Validation Pass
+            kinetix_kicomp::ssa_validate::validate(&mir).map_err(|e| {
+                format_pipeline_error(&input, "MIR Integrity", vec![e])
             })?;
 
             let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
