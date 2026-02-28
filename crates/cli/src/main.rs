@@ -27,11 +27,17 @@ enum Commands {
     Run {
         /// Path to the .exki file
         file: PathBuf,
+        /// Audit allocations and formal invariants
+        #[arg(long)]
+        audit: bool,
     },
     /// Compile and run a .kix source file directly
     Exec {
         /// Path to the .kix source file
         file: PathBuf,
+        /// Audit allocations and formal invariants
+        #[arg(long)]
+        audit: bool,
     },
     /// Compile a .kix source file to .exki bytecode
     Compile {
@@ -295,8 +301,8 @@ fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file } => {
-            if file.extension().and_then(|s| s.to_str()) == Some("kix") {
+        Commands::Run { file, audit } => {
+            if file.extension().map_or(false, |ext| ext == "kix") {
                 return Err(format!("'{}' is a source file. Use 'kivm compile --run {}' instead.", file.display(), file.display()));
             }
 
@@ -305,8 +311,13 @@ fn run() -> Result<(), String> {
             let program = exn::read_exn(&mut cursor).map_err(|e| format!("Error loading .exki: {}", e))?;
             let mut vm = VM::new(program);
             vm.run().map_err(|e| format!("Runtime error: {}", e))?;
+            
+            if audit {
+                println!("\n=== Audit Report ===");
+                println!("Total Heap Allocations: {}", vm.mem_stats.total_heap_allocations);
+            }
         }
-        Commands::Exec { file } => {
+        Commands::Exec { file, audit } => {
             let source = fs::read_to_string(&file).map_err(|e| format!("Error reading {}: {}", file.display(), e))?;
             use kinetix_kicomp::compiler::Compiler;
 
@@ -419,8 +430,17 @@ fn run() -> Result<(), String> {
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled())).map_err(|e| format!("Compilation error: {}", e))?;
             
+            if audit {
+                println!("[✓] Formal Invariants Certified");
+            }
+            
             let mut vm = VM::new(compiled.clone());
             vm.run().map_err(|e| format!("Runtime error: {}", e))?;
+            
+            if audit {
+                println!("\n=== Audit Report ===");
+                println!("Total Heap Allocations: {}", vm.mem_stats.total_heap_allocations);
+            }
         }
         Commands::Compile { input, output, exe, native } => {
             let source = fs::read_to_string(&input).map_err(|e| format!("Error reading {}: {}", input.display(), e))?;

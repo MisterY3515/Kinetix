@@ -125,17 +125,34 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expression
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    // Safe Default Initialization
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint for default initialization".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::Let { name, mutable, type_hint, value, line: start_line })
             }
@@ -163,17 +180,34 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expression
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    // Safe Default Initialization
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint for default initialization".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::State { name, type_hint, value, line: start_line })
             }
@@ -201,17 +235,34 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expression
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    // Safe Default Initialization
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint for default initialization".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::Computed { name, type_hint, value, line: start_line })
             }
@@ -1329,6 +1380,49 @@ mod tests {
         match &prog.statements[0] {
             Statement::Let { name, .. } => assert_eq!(name, "x"),
             _ => panic!("Expected let"),
+        }
+    }
+
+    #[test]
+    fn test_safe_default_initialization() {
+        let arena = Bump::new();
+        // Missing equal sign, but type hint provided -> safe default initialization
+        let l = Lexer::new("let x: int;\nlet y: float;\nlet z: bool;\nlet s: string;");
+        let mut p = Parser::new(l, &arena);
+        let prog = p.parse_program();
+        assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
+        assert_eq!(prog.statements.len(), 4);
+        
+        match &prog.statements[0] {
+            Statement::Let { type_hint, value, .. } => {
+                assert_eq!(type_hint.as_deref().unwrap(), "int");
+                assert!(matches!(value, Expression::Integer(0)));
+            }
+            _ => panic!("Expected Let"),
+        }
+        match &prog.statements[1] {
+            Statement::Let { type_hint, value, .. } => {
+                assert_eq!(type_hint.as_deref().unwrap(), "float");
+                assert!(matches!(value, Expression::Float(f) if *f == 0.0));
+            }
+            _ => panic!("Expected Let"),
+        }
+        match &prog.statements[2] {
+            Statement::Let { type_hint, value, .. } => {
+                assert_eq!(type_hint.as_deref().unwrap(), "bool");
+                assert!(matches!(value, Expression::Boolean(false)));
+            }
+            _ => panic!("Expected Let"),
+        }
+        match &prog.statements[3] {
+            Statement::Let { type_hint, value, .. } => {
+                assert_eq!(type_hint.as_deref().unwrap(), "string");
+                match value {
+                    Expression::String(s) => assert_eq!(s, ""),
+                    _ => panic!("Expected String"),
+                }
+            }
+            _ => panic!("Expected Let"),
         }
     }
 
