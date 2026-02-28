@@ -1,4 +1,4 @@
-use crate::mir::{MirProgram, MirFunction, StatementKind, TerminatorKind};
+use crate::mir::{MirProgram, MirFunction, StatementKind};
 
 /// SSA Integrity Audit Pass
 ///
@@ -31,9 +31,9 @@ fn validate_function(func: &MirFunction) -> Result<(), String> {
     // Future expansion: When explicit SSA Phi nodes are introduced for LLVM generation,
     // we will walk `func.basic_blocks` and assert that no Phi operates on a localized struct field.
     
-    for (block_idx, block) in func.basic_blocks.iter().enumerate() {
-        for (stmt_idx, stmt) in block.statements.iter().enumerate() {
-            if let StatementKind::Assign(place, rval) = &stmt.kind {
+    for (_block_idx, block) in func.basic_blocks.iter().enumerate() {
+        for (_stmt_idx, stmt) in block.statements.iter().enumerate() {
+            if let StatementKind::Assign(_place, _rval) = &stmt.kind {
                 // If the assignment targets a struct, it must assign the whole struct.
                 // Partial assignments (like Place::Field) would trigger an error here
                 // but our Place enum currently only supports root Locals, which structurally

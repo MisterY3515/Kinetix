@@ -68,7 +68,7 @@ computed doubled = counter * 2
 // Computed values are compiled as anonymous closure functions for lazy re-evaluation.
 
 println("=== Testing Reactive Effect ===")
-effect [counter] {
+effect (counter) {
     println("Counter changed!")
 }
 // Effect bodies are compiled as thunk closures with explicit dependency tracking.

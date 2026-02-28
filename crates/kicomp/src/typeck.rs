@@ -103,6 +103,11 @@ impl TypeContext {
                     }
                 }
             }
+            HirStmtKind::Class { methods, .. } => {
+                for m in methods {
+                    self.collect_stmt(m, constraints);
+                }
+            }
             HirStmtKind::While { condition, body } => {
                 self.collect_expr(condition, stmt.line, constraints);
                 // Condition must be bool
@@ -162,6 +167,12 @@ impl TypeContext {
                 let arg_types: Vec<Type> = arguments.iter().map(|a| a.ty.clone()).collect();
                 let expected_fn = Type::Fn(arg_types, Box::new(expr.ty.clone()));
                 constraints.push(Constraint::new(function.ty.clone(), expected_fn, line));
+            }
+            HirExprKind::MethodCall { object, arguments, .. } => {
+                self.collect_expr(object, line, constraints);
+                for arg in arguments {
+                    self.collect_expr(arg, line, constraints);
+                }
             }
             HirExprKind::If { condition, consequence, alternative } => {
                 self.collect_expr(condition, line, constraints);

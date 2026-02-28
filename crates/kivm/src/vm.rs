@@ -427,9 +427,9 @@ impl VM {
                     // before it gets saved into the local/global slot by the subsequent Opcode.
                     frame.set_reg(instr.b, existing_val.clone());
                 } else {
-                    // First time initialization
+                    // First time initialization — do NOT mark dirty.
+                    // Only explicit mutations via UpdateState should trigger a reactive tick.
                     self.state_values.insert(name.clone(), current_eval_val);
-                    self.dirty_states.insert(name);
                 }
             }
             Opcode::UpdateState => {
@@ -438,9 +438,14 @@ impl VM {
                     _ => return Err("UpdateState: expected string constant".into()),
                 };
                 let val = frame.reg(instr.b).clone();
-                // User mutated the state explicitly. Track it to trigger next reactive tick.
+                // Only mark dirty if the value actually changed (prevents infinite loops
+                // when re-assigning the same value, e.g. `counter = 10` inside `if counter == 10`)
+                let changed = self.state_values.get(&name)
+                    .map_or(true, |old| old != &val);
                 self.state_values.insert(name.clone(), val);
-                self.dirty_states.insert(name);
+                if changed {
+                    self.dirty_states.insert(name);
+                }
             }
             Opcode::InitComputed => {
                 // Computed values are initialized in the main flow. 
@@ -554,12 +559,44 @@ impl VM {
                 return Ok(StepResult::TailCall(func_val, args));
             }
 
+            Opcode::LoadMethod => {
+                let obj = frame.reg(instr.b).clone();
+                let method_name = match frame.get_constant(instr.c) {
+                    Constant::String(s) => s.clone(),
+                    _ => return Err("LoadMethod: expected string method name".into()),
+                };
+
+                let class_name = match &obj {
+                    Value::Map(map) => {
+                        match map.get("__class__") {
+                            Some(Value::Str(c)) => c.clone(),
+                            _ => return Err("LoadMethod: object is a map but has no __class__ field".into()),
+                        }
+                    }
+                    _ => return Err("LoadMethod: object is not a class instance".into()),
+                };
+
+                // In Kinetix, methods are compiled as "ClassName::methodName"
+                let flat_name = format!("{}::{}", class_name, method_name);
+                if let Some(func_val) = self.globals.get(&flat_name) {
+                    frame.set_reg(instr.a, Value::BoundMethod(Box::new(obj.clone()), Box::new(func_val.clone())));
+                } else {
+                    return Err(format!("Method '{}' not found on class '{}'", method_name, class_name));
+                }
+            }
+
             Opcode::Return => {
                 let val = frame.reg(instr.a).clone();
                 return Ok(StepResult::Return(val));
             }
             Opcode::ReturnVoid => {
                 return Ok(StepResult::Return(Value::Null));
+            }
+
+            Opcode::MakeClosure => {
+                // MakeClosure is a no-op in the current VM: the register already
+                // holds a Value::Function after LoadConst. When upvalue capture
+                // is implemented, this opcode will wrap it into a proper Closure.
             }
 
             Opcode::Halt => return Ok(StepResult::Halt),

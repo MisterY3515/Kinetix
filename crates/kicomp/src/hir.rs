@@ -64,6 +64,10 @@ pub enum HirStmtKind {
     Block {
         statements: Vec<HirStatement>,
     },
+    Class {
+        name: String,
+        methods: Vec<HirStatement>,
+    },
     Function {
         name: String,
         parameters: Vec<(String, Type)>,
@@ -140,6 +144,11 @@ pub enum HirExprKind {
         left: Box<HirExpression>,
         index: Box<HirExpression>,
     },
+    MethodCall {
+        object: Box<HirExpression>,
+        method: String,
+        arguments: Vec<HirExpression>,
+    },
     MemberAccess {
         object: Box<HirExpression>,
         member: String,
@@ -198,19 +207,29 @@ fn get_line(stmt: &Statement) -> usize {
 fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &crate::trait_solver::TraitEnvironment, fresh: &mut FreshCounter, env: &mut std::collections::HashMap<String, Type>) -> HirStatement {
     let line = get_line(stmt);
     match stmt {
-        Statement::State { name, type_hint: _, value, .. } => {
+        Statement::State { name, type_hint, value, .. } => {
             let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => fresh.fresh(),
+            };
+            env.insert(name.clone(), ty.clone());
             HirStatement {
                 kind: HirStmtKind::State { name: name.clone(), value: hir_val },
-                ty: Type::Void,
+                ty,
                 line,
             }
         }
-        Statement::Computed { name, type_hint: _, value, .. } => {
+        Statement::Computed { name, type_hint, value, .. } => {
             let hir_val = lower_expression(value, symbols, traits, fresh, env);
+            let ty = match type_hint {
+                Some(hint) => parse_type_hint(hint),
+                None => fresh.fresh(),
+            };
+            env.insert(name.clone(), ty.clone());
             HirStatement {
                 kind: HirStmtKind::Computed { name: name.clone(), value: hir_val },
-                ty: Type::Void,
+                ty,
                 line,
             }
         }
@@ -272,6 +291,16 @@ fn lower_statement<'a>(stmt: &Statement<'a>, symbols: &SymbolTable, traits: &cra
             HirStatement {
                 kind: HirStmtKind::Function { name: name.clone(), parameters: params, body: hir_body, return_type: ret.clone() },
                 ty: Type::Void, // function definitions don't produce a value
+                line,
+            }
+        }
+        Statement::Class { name, methods, .. } => {
+            let hir_methods: Vec<HirStatement> = methods.iter()
+                .map(|m| lower_statement(m, symbols, traits, fresh, env))
+                .collect();
+            HirStatement {
+                kind: HirStmtKind::Class { name: name.clone(), methods: hir_methods },
+                ty: Type::Void,
                 line,
             }
         }
@@ -441,6 +470,18 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
             }
         }
         Expression::Call { function, arguments } => {
+            if let Expression::MemberAccess { object, member } = &**function {
+                let obj = lower_expression(object, symbols, traits, fresh, env);
+                let args: Vec<HirExpression> = arguments.iter()
+                    .map(|a| lower_expression(a, symbols, traits, fresh, env))
+                    .collect();
+                let ty = fresh.fresh();
+                return HirExpression {
+                    kind: HirExprKind::MethodCall { object: Box::new(obj), method: member.clone(), arguments: args },
+                    ty,
+                };
+            }
+
             let func = lower_expression(function, symbols, traits, fresh, env);
             let args: Vec<HirExpression> = arguments.iter()
                 .map(|a| lower_expression(a, symbols, traits, fresh, env))

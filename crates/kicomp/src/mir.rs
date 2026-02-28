@@ -1,5 +1,8 @@
 use crate::types::Type;
 use crate::hir::{HirProgram, HirStatement, HirStmtKind, HirExpression, HirExprKind};
+use crate::ir_hash::DeterministicHasher;
+
+use std::hash::{Hash, Hasher};
 
 /// Unique identifier for a local variable in MIR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,14 +12,14 @@ pub struct LocalId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BasicBlock(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mutability {
     Not,
     Mut,
 }
 
 /// A "Place" is an LValue — a memory location that can be read or written.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Place {
     pub local: LocalId,
 }
@@ -30,9 +33,49 @@ pub enum Constant {
     Null,
 }
 
+impl PartialEq for Constant {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Constant::Int(a), Constant::Int(b)) => a == b,
+            (Constant::Float(a), Constant::Float(b)) => a.to_bits() == b.to_bits(),
+            (Constant::Bool(a), Constant::Bool(b)) => a == b,
+            (Constant::String(a), Constant::String(b)) => a == b,
+            (Constant::Null, Constant::Null) => true,
+            _ => false,
+        }
+    }
+}
+impl Eq for Constant {}
+
+impl Hash for Constant {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Constant::Int(i) => {
+                state.write_u8(0);
+                i.hash(state);
+            }
+            Constant::Float(f) => {
+                state.write_u8(1);
+                f.to_bits().hash(state);
+            }
+            Constant::Bool(b) => {
+                state.write_u8(2);
+                b.hash(state);
+            }
+            Constant::String(s) => {
+                state.write_u8(3);
+                s.hash(state);
+            }
+            Constant::Null => {
+                state.write_u8(4);
+            }
+        }
+    }
+}
+
 /// An "Operand" is an argument to an instruction.
 /// It explicitly defines ownership semantics: Move, Copy, or Borrow.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Operand {
     /// Copies a trivially copyable value (e.g., int, float).
     Copy(Place),
@@ -45,7 +88,7 @@ pub enum Operand {
 }
 
 /// An RValue represents a computation that produces a value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RValue {
     /// Yields the value of an operand.
     Use(Operand),
@@ -61,7 +104,7 @@ pub enum RValue {
     Aggregate(String, Vec<Operand>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StatementKind {
     /// Assingment: Place = RValue
     Assign(Place, RValue),
@@ -71,13 +114,13 @@ pub enum StatementKind {
     Drop(Place),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MirStatement {
     pub kind: StatementKind,
     pub line: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TerminatorKind {
     /// Return from the function.
     Return,
@@ -85,26 +128,26 @@ pub enum TerminatorKind {
     Goto(BasicBlock),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Terminator {
     pub kind: TerminatorKind,
     pub line: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BasicBlockData {
     pub statements: Vec<MirStatement>,
     pub terminator: Option<Terminator>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalDecl {
     pub name: Option<String>,
     pub ty: Type,
     pub mutability: Mutability,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MirFunction {
     pub name: String,
     pub args: Vec<LocalId>,
@@ -113,10 +156,26 @@ pub struct MirFunction {
     pub basic_blocks: Vec<BasicBlockData>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MirProgram {
     pub functions: Vec<MirFunction>,
     pub main_block: MirFunction,
+}
+
+impl MirFunction {
+    pub fn compute_hash(&self) -> u64 {
+        let mut hasher = DeterministicHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+impl MirProgram {
+    pub fn compute_hash(&self) -> u64 {
+        let mut hasher = DeterministicHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 /// Helper function to determine if a type is trivially copyable.
@@ -260,6 +319,11 @@ impl<'a> MirBuilder<'a> {
                 // Also pull up any deeply nested functions
                 self.functions.extend(sub_builder.functions);
             }
+            HirStmtKind::Class { methods, .. } => {
+                for m in methods {
+                    self.lower_statement(m);
+                }
+            }
             // For Build 10, we'll implement a subset (Let, Expr, Block).
             // Loops and Ifs will be expanded as needed.
             _ => {}
@@ -330,6 +394,9 @@ impl<'a> MirBuilder<'a> {
                     .map(|(_, e)| self.lower_expression_to_operand(e))
                     .collect();
                 RValue::Aggregate(name.clone(), ops)
+            }
+            HirExprKind::MethodCall { .. } => {
+                unreachable!("MethodCall should have been statically dispatched to Call in Type Normalizer.");
             }
             _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for Match, MemberAccess, etc.
         }

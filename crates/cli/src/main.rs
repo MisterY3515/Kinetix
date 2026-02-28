@@ -341,13 +341,17 @@ fn run() -> Result<(), String> {
             traits.validate_cycles().map_err(|e| format_pipeline_error(&file, "Trait Resolver", vec![e]))?;
 
             let mut hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
-            kinetix_kicomp::type_normalize::normalize(&mut hir).map_err(|e| format_pipeline_error(&file, "Type Normalizer", vec![e]))?;
+            kinetix_kicomp::type_normalize::normalize(&mut hir, &symbols).map_err(|e| format_pipeline_error(&file, "Type Normalizer", vec![e]))?;
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
                 let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
                 format_pipeline_error(&file, "Type Checker", msgs)
             })?;
+
+            // Post-TypeChecker: resolve method calls now that types are concrete
+            kinetix_kicomp::type_normalize::resolve_method_calls(&mut hir, &symbols, &ctx.substitution)
+                .map_err(|e| format_pipeline_error(&file, "Method Resolution", vec![e]))?;
 
             kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
                 .map_err(|e| format_pipeline_error(&file, "Exhaustiveness Checker", vec![e]))?;
@@ -434,13 +438,17 @@ fn run() -> Result<(), String> {
             traits.validate_cycles().map_err(|e| format_pipeline_error(&input, "Trait Resolver", vec![e]))?;
 
             let mut hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
-            kinetix_kicomp::type_normalize::normalize(&mut hir).map_err(|e| format_pipeline_error(&input, "Type Normalizer", vec![e]))?;
+            kinetix_kicomp::type_normalize::normalize(&mut hir, &symbols).map_err(|e| format_pipeline_error(&input, "Type Normalizer", vec![e]))?;
             let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
             let constraints = ctx.collect_constraints(&hir);
             ctx.solve(&constraints).map_err(|errs| {
                 let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
                 format_pipeline_error(&input, "Type Checker", msgs)
             })?;
+
+            // Post-TypeChecker: resolve method calls now that types are concrete
+            kinetix_kicomp::type_normalize::resolve_method_calls(&mut hir, &symbols, &ctx.substitution)
+                .map_err(|e| format_pipeline_error(&input, "Method Resolution", vec![e]))?;
 
             kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
                 .map_err(|e| format_pipeline_error(&input, "Exhaustiveness Checker", vec![e]))?;
@@ -631,7 +639,7 @@ fn run_test_file(path: &Path) -> Result<(), String> {
 
     let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
         .map_err(|errs| format!("Symbol errors: {:?}", errs))?;
-    let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+    let traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
     let hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
     let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
         .map_err(|e| format!("Reactive Graph Error: {}", e))?;

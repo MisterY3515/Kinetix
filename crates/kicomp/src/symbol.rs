@@ -19,12 +19,22 @@ pub struct Symbol {
     pub scope_depth: usize,
 }
 
+/// A registry for struct and class definitions.
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub parent: Option<String>,
+    pub fields: std::collections::HashMap<String, Type>,
+    pub methods: std::collections::HashMap<String, Type>,
+}
+
 /// A scope-aware symbol table with nested scopes.
 #[derive(Debug)]
 pub struct SymbolTable {
     /// Stack of scopes; each scope maps name -> Symbol.
     scopes: Vec<HashMap<String, Symbol>>,
     next_var: u32,
+    pub custom_types: HashMap<String, StructDef>,
 }
 
 impl SymbolTable {
@@ -32,6 +42,7 @@ impl SymbolTable {
         Self {
             scopes: vec![HashMap::new()], // global scope
             next_var: 1,
+            custom_types: HashMap::new(),
         }
     }
 
@@ -120,10 +131,40 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
                 let ret = parse_type_hint(return_type);
                 table.define(name, Type::Fn(param_types, Box::new(ret)), false);
             }
-            Statement::Class { name, .. } => {
+            Statement::Class { name, parent, fields, methods, .. } => {
+                let mut field_map = std::collections::HashMap::new();
+                for (_, f_name, f_type) in fields {
+                    field_map.insert(f_name.clone(), parse_type_hint(f_type));
+                }
+                let mut method_map = std::collections::HashMap::new();
+                for m in methods {
+                    if let Statement::Function { name: m_name, parameters, return_type, .. } = m {
+                        let param_types: Vec<Type> = parameters.iter()
+                            .map(|(_, ty)| parse_type_hint(ty))
+                            .collect();
+                        let ret = parse_type_hint(return_type);
+                        method_map.insert(m_name.clone(), Type::Fn(param_types, Box::new(ret)));
+                    }
+                }
+                table.custom_types.insert(name.clone(), StructDef {
+                    name: name.clone(),
+                    parent: parent.clone(),
+                    fields: field_map,
+                    methods: method_map,
+                });
                 table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
             }
-            Statement::Struct { name, .. } => {
+            Statement::Struct { name, fields, .. } => {
+                let mut field_map = std::collections::HashMap::new();
+                for (f_name, f_type) in fields {
+                    field_map.insert(f_name.clone(), parse_type_hint(f_type));
+                }
+                table.custom_types.insert(name.clone(), StructDef {
+                    name: name.clone(),
+                    parent: None,
+                    fields: field_map,
+                    methods: std::collections::HashMap::new(),
+                });
                 table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
             }
             Statement::Enum { name, .. } => {

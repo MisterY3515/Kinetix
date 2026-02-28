@@ -1,0 +1,5 @@
+// test_error_type_mismatch.kix
+// Verifies: Type Checker catches type mismatch errors
+let a = 10;
+let b = "string";
+let c = a + b; // ERROR: Type mismatch int vs str

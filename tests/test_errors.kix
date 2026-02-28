@@ -1,65 +1,25 @@
 // test_errors.kix (Omnibus error test file)
-// This file contains a collection of intentional compilation errors to verify the Type Checker, Borrow Checker, and Borrow Graph implementation.
+// This file contains intentional errors for Kinetix error reporting.
+// Note: Phases abort sequentially (Parser -> Symbol -> Typeck -> Borrowck).
+// Errors from different phases won't be shown simultaneously.
 
-<<<<<<< Updated upstream
-// 1. Type Mismatch
-=======
-// --- 1. TYPE CHECKER ERRORS ---
->>>>>>> Stashed changes
+// --- TYPE CHECKER ERRORS ---
 let a = 10;
 let b = "string";
-let c = a + b; // ERROR: Type mismatch int vs str
+let c = a + b; // ERROR 1: Type mismatch int vs str
 
-<<<<<<< Updated upstream
-// 2. Linear Move / Use-After-Move
-let d = "hello resource";
-let e = d; // 'd' is moved
-println(d); // ERROR: Use of uninitialized or moved variable 'd'
+let x: int = "hello"; // ERROR 2: Type mismatch str vs int
 
-// 3. Double Borrow (Not fully implemented yet)
-let mut f = 5;
-let ref1 = &mut f;
-// let ref2 = &mut f; // ERROR: Cannot borrow 'f' as mutable more than once at a time
+// --- BORROW CHECKER ERRORS (Will not be reached if Typeck fails) ---
+// let d = "hello resource";
+// let e = d; // 'd' is moved
+// println(d); // ERROR: Use of uninitialized or moved variable 'd'
 
-// 4. Undefined Variable
-// println(undefined_var); // ERROR: Undeclared variable: 'undefined_var'
+// --- NOT IMPLEMENTED YET ---
+// mut f = 5;
+// let ref1 = &mut f; // ERROR: Prefix &mut not yet implemented
 
-// 5. Invalid Option/Result Pattern Matching (exhaustive check verification)
-let opt: Option<int> = Some(42);
-match opt {
-    // Missing 'None' arm!
-    Some(val) => { println(val); }
-} // ERROR (will be added when match exhaustiveness is strict)
-
-// 6. Generic Type Parameter Survival (Regression from Build 15)
-// Attempting to resolve generic types with no concrete substitution
-// println(); // Too few args, but if T was allowed to survive, validate_mono would catch it.
-
-// 7. StructLiteral syntax errors
-// let broken_struct = Point { x: 10 y: 20 }; // ERROR: Expected comma or RBrace
-// let no_name = { x: 10 }; // ERROR: Expected name before LBrace
-// let no_brace = Point x: 10; // ERROR: Expected {
-
-// 8. Linear Struct Aggregation
-// let my_str = "Im moved!";
-// let packet = Packet { msg: my_str };
-// println(my_str); // ERROR: Cannot copy from an uninitialized or moved variable 'my_str'
-=======
-let x: int = "hello"; // ERROR: Type mismatch str vs int
-
-// --- 2. BORROW CHECKER ERRORS ---
-// (Note: These will only be reached if all Typeck errors above are commented out)
-let d = "hello resource";
-let e = d; // 'd' is moved
-println(d); // ERROR: Use of uninitialized or moved variable 'd'
-
-mut f = 5;
-let ref1 = &mut f;
-// let ref2 = &mut f; // ERROR: Cannot borrow 'f' as mutable more than once at a time
-
-// --- 3. NOT IMPLEMENTED YET ---
 // let opt = Some(42);
 // match opt {
 //     Some(val) => println(val) // ERROR: Pattern binding not yet implemented
 // }
->>>>>>> Stashed changes

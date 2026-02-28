@@ -1,0 +1,20 @@
+// test_class.kix — Test OOP method calls via dot-notation
+// Tests: class definition with fields and methods, method call dispatch
+
+class Point {
+    x: int,
+    y: int,
+
+    fn get_x() -> int {
+        return 0;
+    }
+
+    fn greet(name: str) {
+        print("Hello " + name);
+    }
+}
+
+// Test simple method call on a class instance
+let p = Point { x: 10, y: 20 };
+p.greet("World");
+print(p.x);
