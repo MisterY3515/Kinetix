@@ -305,6 +305,7 @@ impl VM {
                     Constant::Null => Value::Null,
                     Constant::Function(idx) => Value::Function(idx),
                     Constant::Class { name, .. } => {
+                         self.mem_stats.total_heap_allocations += 1;
                          let mut map = HashMap::new();
                          map.insert("__class_name__".to_string(), Value::Str(name));
                          self.mem_stats.total_heap_allocations += 1;
@@ -503,6 +504,7 @@ impl VM {
                 }
             }
             Opcode::MakeArray => {
+                self.mem_stats.total_heap_allocations += 1;
                 let start_reg = instr.a;
                 let count = instr.b as usize;
                 let mut arr = Vec::with_capacity(count);
@@ -513,6 +515,7 @@ impl VM {
                 frame.set_reg(instr.a, Value::Array(arr));
             }
             Opcode::MakeMap => {
+                self.mem_stats.total_heap_allocations += 1;
                 let count = instr.b as u16; 
                 let start_reg = instr.a;
                 let mut map = HashMap::new();
@@ -531,6 +534,7 @@ impl VM {
                 frame.set_reg(instr.a, Value::Map(map));
             }
             Opcode::MakeRange => {
+                self.mem_stats.total_heap_allocations += 1;
                 let start = frame.reg(instr.b).as_int()?;
                 let end = frame.reg(instr.c).as_int()?;
                 let mut chars = Vec::new();
