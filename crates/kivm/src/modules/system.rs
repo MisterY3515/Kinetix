@@ -12,20 +12,18 @@ lazy_static::lazy_static! {
 
 // Helper to refresh and get
 #[allow(dead_code)]
-fn with_system<F, T>(f: F) -> T 
+fn with_system<F, T>(f: F) -> Result<T, String>
 where F: FnOnce(&mut System) -> T {
-    let mut sys = SYS.lock().unwrap();
+    let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
     // Refreshing everything is expensive. We should refresh specific parts.
     // sys.refresh_all(); 
-    f(&mut sys)
+    Ok(f(&mut sys))
 }
 
 pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
     match func_name {
         "cpu_usage" => {
-            // Need to sleep a bit to measure CPU usage if not continuously monitoring?
-            // Sysinfo CPU usage is "since last refresh".
-            let mut sys = SYS.lock().unwrap();
+            let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
             sys.refresh_cpu();
             std::thread::sleep(std::time::Duration::from_millis(100));
             sys.refresh_cpu();
@@ -33,13 +31,13 @@ pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
             Ok(Value::Float(usage as f64))
         },
         "memory_free" => {
-            let mut sys = SYS.lock().unwrap();
+            let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
             sys.refresh_memory();
             // Convert bytes to MB
             Ok(Value::Int((sys.free_memory() / 1024 / 1024) as i64))
         },
         "memory_total" => {
-            let mut sys = SYS.lock().unwrap();
+            let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
             sys.refresh_memory();
             Ok(Value::Int((sys.total_memory() / 1024 / 1024) as i64))
         },

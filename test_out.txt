@@ -1,0 +1,16 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running `target\debug\kivm.exe compile --input tests/build19_test.kicomp`
+
+tests/build19_test.kicomp:
+error: Type mismatch: String vs Result<?T10000, String>
+  --> tests/build19_test.kicomp:4
+   |
+ 4 |     let content: String = data.read_text("test.txt")
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  1 error(s) in Type Checker
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.7 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
+error: process didn't exit successfully: `target\debug\kivm.exe compile --input tests/build19_test.kicomp` (exit code: 1)
