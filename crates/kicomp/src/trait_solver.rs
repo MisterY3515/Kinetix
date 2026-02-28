@@ -1,6 +1,7 @@
 use crate::types::{Type, parse_type_hint};
 use kinetix_language::ast::Statement;
 use std::collections::HashMap;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone)]
 pub struct TraitMethod {
@@ -29,6 +30,8 @@ pub struct TraitEnvironment {
     pub traits: HashMap<String, TraitDef>,
     // Maps a TargetTypeName -> List of Impls for that type
     pub impls: HashMap<String, Vec<ImplDef>>,
+    // Caching for method resolution
+    pub method_cache: RefCell<HashMap<(String, String), TraitMethod>>,
 }
 
 impl TraitEnvironment {
@@ -36,6 +39,7 @@ impl TraitEnvironment {
         Self {
             traits: HashMap::new(),
             impls: HashMap::new(),
+            method_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -108,9 +112,15 @@ impl TraitEnvironment {
 
     /// Resolve a method for a given target type.
     pub fn resolve_method(&self, target_type_name: &str, method_name: &str) -> Option<TraitMethod> {
+        let cache_key = (target_type_name.to_string(), method_name.to_string());
+        if let Some(cached) = self.method_cache.borrow().get(&cache_key) {
+            return Some(cached.clone());
+        }
+
         if let Some(impls) = self.impls.get(target_type_name) {
             for imp in impls {
                 if let Some(method) = imp.methods.get(method_name) {
+                    self.method_cache.borrow_mut().insert(cache_key, method.clone());
                     return Some(method.clone());
                 }
             }
