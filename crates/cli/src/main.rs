@@ -302,7 +302,7 @@ fn run() -> Result<(), String> {
 
     match cli.command {
         Commands::Run { file, audit } => {
-            if file.extension().and_then(|s| s.to_str()) == Some("kix") {
+            if file.extension().map_or(false, |ext| ext == "kix") {
                 return Err(format!("'{}' is a source file. Use 'kivm compile --run {}' instead.", file.display(), file.display()));
             }
 

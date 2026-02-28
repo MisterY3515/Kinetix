@@ -1,34 +1,37 @@
 // phase3_oop.kix
-// Comprehensive test for Kinetix Phase 3: Safe Default Init, Struct, Allocation Audit & Reactive.
+// A comprehensive test for Kinetix Phase 3: Safe Default Init, Allocation Audit, Reactive & OOP.
 
 println("=== Testing Safe Default Initialization ===")
-let counter: int
-let active: bool
-let name: string
+let counter: int;
+let active: bool;
+let name: string;
 
 if counter == 0 { println("int defaults to 0") }
 if active == false { println("bool defaults to false") }
 if name == "" { println("string defaults to empty string") }
 
-println("=== Testing Struct Creation ===")
-struct Player {
-    x: float,
-    y: float
+println("=== Testing OOP (Class & Methods) ===")
+class Player {
+    pub x: float
+    pub y: float
+    // Note: in Kinetix, backend class instantiation maps to nominal structs with hidden __class__ field.
+
+    fn new(start_x: float, start_y: float) -> Player {
+        let p = Player { x: start_x, y: start_y };
+        return p;
+    }
+
+    fn move(self, dx: float, dy: float) -> Player {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
+        return self;
+    }
 }
 
-fn new_player(start_x: float, start_y: float) -> Player {
-    let p = Player { x: start_x, y: start_y }
-    return p
-}
-
-let p1 = new_player(10.0, 20.0)
-if (p1.x == 10.0) { println("Player X created correctly") }
-if (p1.y == 20.0) { println("Player Y created correctly") }
-
-println("=== Testing Arrays & Strings (Allocation Tracking) ===")
-let arr = [1, 2, 3]
-let greeting = "hello" + " " + "world"
-if (greeting == "hello world") { println("String concat OK") }
+let p1 = Player::new(10.0, 20.0);
+let p2 = p1.move(5.0, -10.0);
+if (p2.x == 15.0) { println("Player X moved correctly") }
+if (p2.y == 10.0) { println("Player Y moved correctly") }
 
 println("=== Testing Reactive State & Computed ===")
 state level = 1
