@@ -100,8 +100,13 @@ fn convert_json_to_value(v: serde_json::Value) -> Result<Value, String> {
         serde_json::Value::Null => Ok(Value::Null),
         serde_json::Value::Bool(b) => Ok(Value::Bool(b)),
         serde_json::Value::Number(n) => {
-            if n.is_i64() { Ok(Value::Int(n.as_i64().unwrap())) }
-            else { Ok(Value::Float(n.as_f64().unwrap())) }
+            if let Some(i) = n.as_i64() { 
+                Ok(Value::Int(i)) 
+            } else if let Some(f) = n.as_f64() { 
+                Ok(Value::Float(f)) 
+            } else {
+                Err("JSON number conversion overflow".to_string())
+            }
         },
         serde_json::Value::String(s) => Ok(Value::Str(s)),
         serde_json::Value::Array(a) => {

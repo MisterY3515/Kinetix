@@ -1,0 +1,6 @@
+fn main() {
+    // This should fail type-checking because `data.read_text` now returns `Result<String, String>`
+    // but we are trying to assign it to a plain `String` (or trusting it blindly without pattern matching).
+    let content: String = data.read_text("test.txt")
+    println(content)
+}

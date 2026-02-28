@@ -356,6 +356,20 @@ fn run() -> Result<(), String> {
             kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
                 .map_err(|e| format_pipeline_error(&file, "Exhaustiveness Checker", vec![e]))?;
 
+            // M2.6 Capability IR Enforcement Pass (Build 19)
+            let granted_caps = vec![
+                kinetix_kicomp::capability::Capability::FsRead,
+                kinetix_kicomp::capability::Capability::FsWrite,
+                kinetix_kicomp::capability::Capability::NetAccess,
+                kinetix_kicomp::capability::Capability::SysInfo,
+                kinetix_kicomp::capability::Capability::OsExecute,
+            ];
+            let cap_validator = kinetix_kicomp::capability::CapabilityValidator::new(granted_caps.clone());
+            cap_validator.validate(&hir).map_err(|errs| {
+                let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                format_pipeline_error(&file, "Sandbox Audit Pass", msgs)
+            })?;
+
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
                 format_pipeline_error(&file, "Borrow Checker", errs)
@@ -452,6 +466,19 @@ fn run() -> Result<(), String> {
 
             kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
                 .map_err(|e| format_pipeline_error(&input, "Exhaustiveness Checker", vec![e]))?;
+
+            // M2.6 Capability IR Enforcement Pass (Build 19)
+            let cap_validator = kinetix_kicomp::capability::CapabilityValidator::new(vec![
+                kinetix_kicomp::capability::Capability::FsRead,
+                kinetix_kicomp::capability::Capability::FsWrite,
+                kinetix_kicomp::capability::Capability::NetAccess,
+                kinetix_kicomp::capability::Capability::SysInfo,
+                kinetix_kicomp::capability::Capability::OsExecute,
+            ]);
+            cap_validator.validate(&hir).map_err(|errs| {
+                let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                format_pipeline_error(&input, "Sandbox Audit Pass", msgs)
+            })?;
 
             let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
             kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {

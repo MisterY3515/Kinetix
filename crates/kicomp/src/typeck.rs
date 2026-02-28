@@ -173,6 +173,27 @@ impl TypeContext {
                 for arg in arguments {
                     self.collect_expr(arg, line, constraints);
                 }
+
+                // --- M2.6 GLOBAL ENFORCEMENT: Fallible Builtins return Result<T,E> ---
+                // If the object is a recognized builtin capability module, type-check the Result wrapper.
+                if let Type::Custom { name, .. } = &object.ty {
+                    if name == "data" || name == "system" || name == "net" || name == "os" {
+                        let method_str = if let HirExprKind::MethodCall { method, .. } = &expr.kind { method.as_str() } else { "" };
+                        
+                        // Exclusion list for info methods safely mapped internally:
+                        let safe = ["uptime", "cpu_usage", "memory_free", "os_name", "os_version"];
+                        
+                        if !safe.contains(&method_str) {
+                            // Enforce Result<OkType, String>
+                            let ok_ty = self.fresh_var();
+                            let result_ty = Type::Custom {
+                                name: "Result".into(),
+                                args: vec![ok_ty, Type::Custom { name: "String".into(), args: vec![] }],
+                            };
+                            constraints.push(Constraint::new(expr.ty.clone(), result_ty, line));
+                        }
+                    }
+                }
             }
             HirExprKind::If { condition, consequence, alternative } => {
                 self.collect_expr(condition, line, constraints);
