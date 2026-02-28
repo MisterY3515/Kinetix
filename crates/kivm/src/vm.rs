@@ -153,6 +153,12 @@ impl CallFrame {
     }
 }
 
+/// Statistics for Memory Allocations (Global Allocation Audit)
+#[derive(Debug, Clone, Default)]
+pub struct MemoryStats {
+    pub total_heap_allocations: usize,
+}
+
 pub struct VM {
     program: CompiledProgram,
     call_stack: Vec<CallFrame>,
@@ -162,6 +168,9 @@ pub struct VM {
     // Reactive Core Data
     state_values: HashMap<String, Value>,
     dirty_states: std::collections::HashSet<String>,
+    
+    // Memory Tracking
+    pub mem_stats: MemoryStats,
 }
 
 impl VM {
@@ -178,6 +187,7 @@ impl VM {
             output: Vec::new(),
             state_values: HashMap::new(),
             dirty_states: std::collections::HashSet::new(),
+            mem_stats: MemoryStats::default(),
         }
     }
 
@@ -287,11 +297,15 @@ impl VM {
                 let val = match c {
                     Constant::Integer(i) => Value::Int(i),
                     Constant::Float(f) => Value::Float(f),
-                    Constant::String(s) => Value::Str(s),
+                    Constant::String(s) => {
+                        self.mem_stats.total_heap_allocations += 1;
+                        Value::Str(s)
+                    },
                     Constant::Boolean(b) => Value::Bool(b),
                     Constant::Null => Value::Null,
                     Constant::Function(idx) => Value::Function(idx),
                     Constant::Class { name, .. } => {
+                         self.mem_stats.total_heap_allocations += 1;
                          let mut map = HashMap::new();
                          map.insert("__class_name__".to_string(), Value::Str(name));
                          Value::Map(map)
@@ -311,7 +325,10 @@ impl VM {
                     (Value::Float(a), Value::Float(b)) => frame.set_reg(instr.a, Value::Float(a + b)),
                     (Value::Int(a), Value::Float(b)) => frame.set_reg(instr.a, Value::Float(a as f64 + b)),
                     (Value::Float(a), Value::Int(b)) => frame.set_reg(instr.a, Value::Float(a + b as f64)),
-                    (Value::Str(a), Value::Str(b)) => frame.set_reg(instr.a, Value::Str(a + &b)),
+                    (Value::Str(a), Value::Str(b)) => {
+                        self.mem_stats.total_heap_allocations += 1;
+                        frame.set_reg(instr.a, Value::Str(a + &b));
+                    },
                     _ => return Err("Invalid types for Add".into()),
                 }
             }
@@ -486,6 +503,7 @@ impl VM {
                 }
             }
             Opcode::MakeArray => {
+                self.mem_stats.total_heap_allocations += 1;
                 let start_reg = instr.a;
                 let count = instr.b as usize;
                 let mut arr = Vec::with_capacity(count);
@@ -495,6 +513,7 @@ impl VM {
                 frame.set_reg(instr.a, Value::Array(arr));
             }
             Opcode::MakeMap => {
+                self.mem_stats.total_heap_allocations += 1;
                 let count = instr.b as u16; 
                 let start_reg = instr.a;
                 let mut map = HashMap::new();
@@ -512,6 +531,7 @@ impl VM {
                 frame.set_reg(instr.a, Value::Map(map));
             }
             Opcode::MakeRange => {
+                self.mem_stats.total_heap_allocations += 1;
                 let start = frame.reg(instr.b).as_int()?;
                 let end = frame.reg(instr.c).as_int()?;
                 let mut chars = Vec::new();

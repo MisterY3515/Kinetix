@@ -125,17 +125,33 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expr
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::Let { name, mutable, type_hint, value, line: start_line })
             }
@@ -163,17 +179,33 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expr
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::State { name, type_hint, value, line: start_line })
             }
@@ -201,17 +233,33 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     }
                 }
 
-                if !self.expect_peek(Token::Equal) {
+                let value = if self.peek_token == Token::Equal {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to expr
+                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else if let Some(ref t) = type_hint {
+                    let expr = match t.as_str() {
+                        "int" => Expression::Integer(0),
+                        "float" => Expression::Float(0.0),
+                        "bool" => Expression::Boolean(false),
+                        "string" | "str" => Expression::String("".to_string()),
+                        _ => {
+                            self.push_error(format!("Cannot default initialize type '{}'", t));
+                            return None;
+                        }
+                    };
+                    if self.peek_token == Token::Semicolon {
+                        self.next_token();
+                    }
+                    expr
+                } else {
+                    self.push_error("Must provide an initial value or a type hint".to_string());
                     return None;
-                }
-                
-                self.next_token();
-                
-                let value = self.parse_expression(Precedence::Lowest)?;
-                
-                if self.peek_token == Token::Semicolon {
-                    self.next_token();
-                }
+                };
                 
                 Some(Statement::Computed { name, type_hint, value, line: start_line })
             }

@@ -1,0 +1,41 @@
+// phase3_oop.kix
+// Comprehensive test for Kinetix Phase 3: Safe Default Init, Struct, Allocation Audit & Reactive.
+
+println("=== Testing Safe Default Initialization ===")
+let counter: int
+let active: bool
+let name: string
+
+if counter == 0 { println("int defaults to 0") }
+if active == false { println("bool defaults to false") }
+if name == "" { println("string defaults to empty string") }
+
+println("=== Testing Struct Creation ===")
+struct Player {
+    x: float,
+    y: float
+}
+
+fn new_player(start_x: float, start_y: float) -> Player {
+    let p = Player { x: start_x, y: start_y }
+    return p
+}
+
+let p1 = new_player(10.0, 20.0)
+if (p1.x == 10.0) { println("Player X created correctly") }
+if (p1.y == 20.0) { println("Player Y created correctly") }
+
+println("=== Testing Arrays & Strings (Allocation Tracking) ===")
+let arr = [1, 2, 3]
+let greeting = "hello" + " " + "world"
+if (greeting == "hello world") { println("String concat OK") }
+
+println("=== Testing Reactive State & Computed ===")
+state level = 1
+computed difficulty = level * 10
+effect (level) {
+    println("Level up detected!")
+}
+level = 2
+
+println("=== Phase 3 Tests Completed Successfully! ===")

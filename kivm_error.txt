@@ -1,0 +1,9 @@
+
+tests\phase3_oop.kix:
+  - Type `Player` has no method named `new`
+  1 error(s) in Method Resolution
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.7 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
