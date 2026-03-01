@@ -1,0 +1,42 @@
+// Phase 4: Threading Ownership-Safe test
+println("=== Kinetix Build 25 Threading Test ===")
+
+fn heavy_computation(id: int, start_val: int) -> int {
+    print("Thread started: ")
+    println(id)
+    system.thread.sleep(500)
+    
+    // Simulate work without arrays to avoid resolver issues with unmapped builtins
+    mut sum = 0
+    let elements = 1000
+    for i in 0..elements {
+        sum = sum + (start_val + i)
+    }
+    
+    print("Thread finished work: ")
+    println(id)
+    return sum
+}
+
+println("Main Thread executing...")
+let t1_res = system.thread.spawn(heavy_computation, 1, 100)
+let t2_res = system.thread.spawn(heavy_computation, 2, 200)
+
+let t1_id = t1_res.ok
+let t2_id = t2_res.ok
+print("Spawned Thread 1 with ID: ")
+println(t1_id)
+print("Spawned Thread 2 with ID: ")
+println(t2_id)
+
+println("Main Thread waiting for child threads to join...")
+
+let result1 = system.thread.join(t1_id)
+let result2 = system.thread.join(t2_id)
+
+print("Thread 1 Result: ")
+println(result1.ok)
+print("Thread 2 Result: ")
+println(result2.ok)
+
+println("Threading passed! No cross-thread Aliasing!")

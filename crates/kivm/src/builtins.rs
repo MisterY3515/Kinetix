@@ -5,6 +5,14 @@ use crate::vm::Value;
 #[path = "modules/mod.rs"]
 pub mod modules;
 
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+
+lazy_static::lazy_static! {
+    static ref THREAD_REGISTRY: Arc<Mutex<std::collections::HashMap<i64, JoinHandle<Result<Value, String>>>>> = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    static ref NEXT_THREAD_ID: Arc<Mutex<i64>> = Arc::new(Mutex::new(1));
+}
+
 pub const BUILTIN_NAMES: &[&str] = &[
     // Core
     "print", "println", "input", "len", "typeof", "assert",
@@ -655,6 +663,66 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
         "bool" => Ok(Value::Bool(args.first().map(|v| v.is_truthy()).unwrap_or(false))),
         
         // --- OS Detection & System Layer ---
+        "system.thread.spawn" => {
+            if args.is_empty() {
+                return Ok(modules::system::call("thread.spawn", args)?); // Error path fallback
+            }
+
+            let func_val = args[0].clone();
+            let thread_args: Vec<Value> = args.iter().skip(1).cloned().collect();
+            let cloned_program = vm.clone_program();
+
+            let mut id_lock = NEXT_THREAD_ID.lock().map_err(|_| "Failed to lock Thread ID generator")?;
+            let thread_id = *id_lock;
+            *id_lock += 1;
+
+            let handle = std::thread::spawn(move || {
+                let mut child_vm = VM::new(cloned_program);
+                // Trigger execution loop for this function natively inside the child vm instance.
+                child_vm.run_function(func_val, thread_args)
+            });
+
+            THREAD_REGISTRY.lock().map_err(|_| "Thread mapping lock failed")?.insert(thread_id, handle);
+            
+            // Return simulation of Kinetix Result<T, E> mapping to Ok(ID)
+            let mut res = std::collections::HashMap::new();
+            res.insert("ok".to_string(), Value::Int(thread_id));
+            Ok(Value::Map(res))
+        },
+        "system.thread.join" => {
+            if let Some(Value::Int(id)) = args.first() {
+                let handle_opt = THREAD_REGISTRY.lock().map_err(|_| "Thread mapping lock failed")?.remove(id);
+                if let Some(handle) = handle_opt {
+                    match handle.join() {
+                        Ok(thread_res) => {
+                            match thread_res {
+                                Ok(val) => {
+                                    let mut res = std::collections::HashMap::new();
+                                    res.insert("ok".to_string(), val);
+                                    Ok(Value::Map(res))
+                                },
+                                Err(e) => {
+                                    let mut res = std::collections::HashMap::new();
+                                    res.insert("err".to_string(), Value::Str(e));
+                                    Ok(Value::Map(res))
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str("Native thread panicked".to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                } else {
+                    let mut res = std::collections::HashMap::new();
+                    res.insert("err".to_string(), Value::Str(format!("Thread ID {} not found or already joined", id)));
+                    Ok(Value::Map(res))
+                }
+            } else {
+                return Ok(modules::system::call("thread.join", args)?); // Error path fallback
+            }
+        },
         name if name.starts_with("system.") => modules::system::call(&name[7..], args),
 
         _ => Err(format!("Unknown built-in: {}", name)),
