@@ -374,6 +374,7 @@ fn run() -> Result<(), String> {
                 kinetix_kicomp::capability::Capability::NetAccess,
                 kinetix_kicomp::capability::Capability::SysInfo,
                 kinetix_kicomp::capability::Capability::OsExecute,
+                kinetix_kicomp::capability::Capability::ThreadControl,
             ];
             let cap_validator = kinetix_kicomp::capability::CapabilityValidator::new(granted_caps.clone());
             cap_validator.validate(&hir).map_err(|errs| {
@@ -504,6 +505,7 @@ fn run() -> Result<(), String> {
                 kinetix_kicomp::capability::Capability::NetAccess,
                 kinetix_kicomp::capability::Capability::SysInfo,
                 kinetix_kicomp::capability::Capability::OsExecute,
+                kinetix_kicomp::capability::Capability::ThreadControl,
             ]);
             cap_validator.validate(&hir).map_err(|errs| {
                 let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
