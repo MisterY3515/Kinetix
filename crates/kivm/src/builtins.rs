@@ -29,6 +29,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "math.distance_sq", "math.dot", "math.cross", "math.normalize",
     "System.time", "time.now", "time.ticks", "time.sleep",
     "system.os.isWindows", "system.os.isLinux", "system.os.isMac",
+    "system.os.name", "system.os.arch", "system.exec",
+    "system.thread.spawn", "system.thread.join", "system.thread.sleep", "system.defer",
     "env.get", "env.set", "env.args",
 ];
 
@@ -652,10 +654,8 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
         },
         "bool" => Ok(Value::Bool(args.first().map(|v| v.is_truthy()).unwrap_or(false))),
         
-        // --- OS Detection ---
-        "system.os.isWindows" => Ok(Value::Bool(cfg!(windows))),
-        "system.os.isLinux" => Ok(Value::Bool(cfg!(target_os = "linux"))),
-        "system.os.isMac" => Ok(Value::Bool(cfg!(target_os = "macos"))),
+        // --- OS Detection & System Layer ---
+        name if name.starts_with("system.") => modules::system::call(&name[7..], args),
 
         _ => Err(format!("Unknown built-in: {}", name)),
     }

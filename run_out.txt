@@ -1,0 +1,166 @@
+   Compiling kinetix-kicomp v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\kicomp)
+   Compiling kinetix-kivm v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\kivm)
+   Compiling kinetix-cli v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.42s
+     Running `target\debug\kivm.exe exec tests/phase4_system.kix`
+TRACE: [IP:0] Instruction { opcode: LoadConst, a: 0, b: 1, c: 0 }
+TRACE: [IP:1] Instruction { opcode: SetGlobal, a: 0, b: 0, c: 0 }
+TRACE: [IP:2] Instruction { opcode: LoadConst, a: 0, b: 3, c: 0 }
+TRACE: [IP:3] Instruction { opcode: SetGlobal, a: 2, b: 0, c: 0 }
+TRACE: [IP:4] Instruction { opcode: LoadConst, a: 0, b: 5, c: 0 }
+TRACE: [IP:5] Instruction { opcode: SetGlobal, a: 4, b: 0, c: 0 }
+TRACE: [IP:6] Instruction { opcode: LoadConst, a: 0, b: 7, c: 0 }
+TRACE: [IP:7] Instruction { opcode: SetGlobal, a: 6, b: 0, c: 0 }
+TRACE: [IP:8] Instruction { opcode: GetGlobal, a: 0, b: 6, c: 0 }
+TRACE: [IP:9] Instruction { opcode: SetLocal, a: 1, b: 0, c: 0 }
+TRACE: [IP:10] Instruction { opcode: Call, a: 1, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = Function(3) at instr.a=1
+TRACE: [IP:0] Instruction { opcode: GetGlobal, a: 0, b: 0, c: 0 }
+TRACE: [IP:1] Instruction { opcode: SetLocal, a: 1, b: 0, c: 0 }
+TRACE: [IP:2] Instruction { opcode: LoadConst, a: 2, b: 1, c: 0 }
+TRACE: [IP:3] Instruction { opcode: Call, a: 1, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=1
+=== Kinetix Build 23 Phase 4 Full System Test ===
+TRACE: [IP:4] Instruction { opcode: GetGlobal, a: 0, b: 2, c: 0 }
+TRACE: [IP:5] Instruction { opcode: SetLocal, a: 1, b: 0, c: 0 }
+TRACE: [IP:6] Instruction { opcode: Call, a: 1, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = Function(0) at instr.a=1
+TRACE: [IP:0] Instruction { opcode: GetGlobal, a: 0, b: 0, c: 0 }
+TRACE: [IP:1] Instruction { opcode: Call, a: 0, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("system.os.name") at instr.a=0
+TRACE: [IP:2] Instruction { opcode: GetGlobal, a: 1, b: 1, c: 0 }
+TRACE: [IP:3] Instruction { opcode: Call, a: 1, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("system.os.arch") at instr.a=1
+TRACE: [IP:4] Instruction { opcode: GetGlobal, a: 2, b: 2, c: 0 }
+TRACE: [IP:5] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:6] Instruction { opcode: LoadConst, a: 4, b: 3, c: 0 }
+TRACE: [IP:7] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=3
+OS Name: 
+TRACE: [IP:8] Instruction { opcode: GetGlobal, a: 2, b: 4, c: 0 }
+TRACE: [IP:9] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:10] Instruction { opcode: GetMember, a: 4, b: 0, c: 5 }
+TRACE: [IP:11] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=3
+Windows
+TRACE: [IP:12] Instruction { opcode: GetGlobal, a: 2, b: 2, c: 0 }
+TRACE: [IP:13] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:14] Instruction { opcode: LoadConst, a: 4, b: 6, c: 0 }
+TRACE: [IP:15] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=3
+Architecture: 
+TRACE: [IP:16] Instruction { opcode: GetGlobal, a: 2, b: 4, c: 0 }
+TRACE: [IP:17] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:18] Instruction { opcode: GetMember, a: 4, b: 1, c: 5 }
+TRACE: [IP:19] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=3
+x86_64
+TRACE: [IP:20] Instruction { opcode: GetGlobal, a: 2, b: 4, c: 0 }
+TRACE: [IP:21] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:22] Instruction { opcode: LoadConst, a: 4, b: 7, c: 0 }
+TRACE: [IP:23] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=3
+Testing sleep...
+TRACE: [IP:24] Instruction { opcode: GetGlobal, a: 2, b: 8, c: 0 }
+TRACE: [IP:25] Instruction { opcode: LoadConst, a: 3, b: 9, c: 0 }
+TRACE: [IP:26] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("system.thread.sleep") at instr.a=2
+TRACE: [IP:27] Instruction { opcode: GetGlobal, a: 2, b: 4, c: 0 }
+TRACE: [IP:28] Instruction { opcode: SetLocal, a: 3, b: 2, c: 0 }
+TRACE: [IP:29] Instruction { opcode: LoadConst, a: 4, b: 10, c: 0 }
+TRACE: [IP:30] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=3
+Woke up from 500ms sleep
+TRACE: [IP:31] Instruction { opcode: GetGlobal, a: 2, b: 11, c: 0 }
+TRACE: [IP:32] Instruction { opcode: Call, a: 2, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("system.thread.join") at instr.a=2
+TRACE: [IP:33] Instruction { opcode: GetGlobal, a: 3, b: 2, c: 0 }
+TRACE: [IP:34] Instruction { opcode: SetLocal, a: 4, b: 3, c: 0 }
+TRACE: [IP:35] Instruction { opcode: LoadConst, a: 5, b: 12, c: 0 }
+TRACE: [IP:36] Instruction { opcode: Call, a: 4, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=4
+Join error test: 
+TRACE: [IP:37] Instruction { opcode: GetGlobal, a: 3, b: 4, c: 0 }
+TRACE: [IP:38] Instruction { opcode: SetLocal, a: 4, b: 3, c: 0 }
+TRACE: [IP:39] Instruction { opcode: GetMember, a: 5, b: 2, c: 13 }
+TRACE: [IP:40] Instruction { opcode: Call, a: 4, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=4
+Not Implemented: thread.join
+TRACE: [IP:41] Instruction { opcode: GetGlobal, a: 3, b: 14, c: 0 }
+TRACE: [IP:42] Instruction { opcode: LoadConst, a: 4, b: 15, c: 0 }
+TRACE: [IP:43] Instruction { opcode: Call, a: 3, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("system.exec") at instr.a=3
+TRACE: [IP:44] Instruction { opcode: GetMember, a: 4, b: 3, c: 5 }
+TRACE: [IP:45] Instruction { opcode: LoadNull, a: 5, b: 0, c: 0 }
+TRACE: [IP:46] Instruction { opcode: Neq, a: 6, b: 4, c: 5 }
+TRACE: [IP:47] Instruction { opcode: JumpIfFalse, a: 58, b: 6, c: 0 }
+TRACE: [IP:48] Instruction { opcode: GetGlobal, a: 8, b: 4, c: 0 }
+TRACE: [IP:49] Instruction { opcode: SetLocal, a: 9, b: 8, c: 0 }
+TRACE: [IP:50] Instruction { opcode: LoadConst, a: 10, b: 16, c: 0 }
+TRACE: [IP:51] Instruction { opcode: Call, a: 9, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=9
+Exec output:
+TRACE: [IP:52] Instruction { opcode: GetGlobal, a: 11, b: 4, c: 0 }
+TRACE: [IP:53] Instruction { opcode: SetLocal, a: 12, b: 11, c: 0 }
+TRACE: [IP:54] Instruction { opcode: GetMember, a: 13, b: 3, c: 5 }
+TRACE: [IP:55] Instruction { opcode: GetMember, a: 14, b: 13, c: 17 }
+TRACE: [IP:56] Instruction { opcode: SetLocal, a: 13, b: 14, c: 0 }
+TRACE: [IP:57] Instruction { opcode: Call, a: 12, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=12
+hello from kinetix shell
+
+TRACE: [IP:58] Instruction { opcode: ReturnVoid, a: 0, b: 0, c: 0 }
+TRACE: [IP:7] Instruction { opcode: GetGlobal, a: 0, b: 3, c: 0 }
+TRACE: [IP:8] Instruction { opcode: SetLocal, a: 1, b: 0, c: 0 }
+TRACE: [IP:9] Instruction { opcode: Call, a: 1, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = Function(2) at instr.a=1
+TRACE: [IP:0] Instruction { opcode: MakeMap, a: 0, b: 0, c: 0 }
+TRACE: [IP:1] Instruction { opcode: LoadConst, a: 1, b: 1, c: 0 }
+TRACE: [IP:2] Instruction { opcode: SetMember, a: 0, b: 0, c: 1 }
+TRACE: [IP:3] Instruction { opcode: LoadConst, a: 2, b: 2, c: 0 }
+TRACE: [IP:4] Instruction { opcode: SetMember, a: 0, b: 3, c: 2 }
+TRACE: [IP:5] Instruction { opcode: LoadConst, a: 3, b: 4, c: 0 }
+TRACE: [IP:6] Instruction { opcode: SetMember, a: 0, b: 5, c: 3 }
+TRACE: [IP:7] Instruction { opcode: LoadMethod, a: 1, b: 0, c: 6 }
+TRACE: [IP:8] Instruction { opcode: Call, a: 1, b: 0, c: 0 }
+DEBUG OP_CALL: func_val = BoundMethod(Map({"y": Int(20), "__class__": Str("Point"), "x": Int(10)}), Function(1)) at instr.a=1
+TRACE: [IP:0] Instruction { opcode: GetGlobal, a: 1, b: 0, c: 0 }
+TRACE: [IP:1] Instruction { opcode: SetLocal, a: 2, b: 1, c: 0 }
+TRACE: [IP:2] Instruction { opcode: LoadConst, a: 3, b: 1, c: 0 }
+TRACE: [IP:3] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=2
+Point(
+TRACE: [IP:4] Instruction { opcode: GetGlobal, a: 1, b: 0, c: 0 }
+TRACE: [IP:5] Instruction { opcode: SetLocal, a: 2, b: 1, c: 0 }
+TRACE: [IP:6] Instruction { opcode: GetMember, a: 3, b: 0, c: 2 }
+TRACE: [IP:7] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=2
+10
+TRACE: [IP:8] Instruction { opcode: GetGlobal, a: 1, b: 0, c: 0 }
+TRACE: [IP:9] Instruction { opcode: SetLocal, a: 2, b: 1, c: 0 }
+TRACE: [IP:10] Instruction { opcode: LoadConst, a: 3, b: 3, c: 0 }
+TRACE: [IP:11] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=2
+, 
+TRACE: [IP:12] Instruction { opcode: GetGlobal, a: 1, b: 0, c: 0 }
+TRACE: [IP:13] Instruction { opcode: SetLocal, a: 2, b: 1, c: 0 }
+TRACE: [IP:14] Instruction { opcode: GetMember, a: 3, b: 0, c: 4 }
+TRACE: [IP:15] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("print") at instr.a=2
+20
+TRACE: [IP:16] Instruction { opcode: GetGlobal, a: 1, b: 5, c: 0 }
+TRACE: [IP:17] Instruction { opcode: SetLocal, a: 2, b: 1, c: 0 }
+TRACE: [IP:18] Instruction { opcode: LoadConst, a: 3, b: 6, c: 0 }
+TRACE: [IP:19] Instruction { opcode: Call, a: 2, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=2
+)
+TRACE: [IP:20] Instruction { opcode: ReturnVoid, a: 0, b: 0, c: 0 }
+TRACE: [IP:9] Instruction { opcode: ReturnVoid, a: 0, b: 0, c: 0 }
+TRACE: [IP:10] Instruction { opcode: GetGlobal, a: 0, b: 0, c: 0 }
+TRACE: [IP:11] Instruction { opcode: SetLocal, a: 1, b: 0, c: 0 }
+TRACE: [IP:12] Instruction { opcode: LoadConst, a: 2, b: 4, c: 0 }
+TRACE: [IP:13] Instruction { opcode: Call, a: 1, b: 1, c: 0 }
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=1
+All systems operational.
+TRACE: [IP:14] Instruction { opcode: ReturnVoid, a: 0, b: 0, c: 0 }
+TRACE: [IP:11] Instruction { opcode: Halt, a: 0, b: 0, c: 0 }

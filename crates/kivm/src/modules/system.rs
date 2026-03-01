@@ -20,7 +20,19 @@ where F: FnOnce(&mut System) -> T {
     Ok(f(&mut sys))
 }
 
-pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
+pub fn call(func_name: &str, args: &[Value]) -> Result<Value, String> {
+    // Helper to simulate Kinetix Result<T, E> enum
+    let ok_res = |v: Value| -> Value {
+        let mut m = std::collections::HashMap::new();
+        m.insert("ok".to_string(), v);
+        Value::Map(m)
+    };
+    let err_res = |msg: &str| -> Value {
+        let mut m = std::collections::HashMap::new();
+        m.insert("err".to_string(), Value::Str(msg.to_string()));
+        Value::Map(m)
+    };
+
     match func_name {
         "cpu_usage" => {
             let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
@@ -33,7 +45,6 @@ pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
         "memory_free" => {
             let mut sys = SYS.lock().map_err(|_| "Global system context lock failed")?;
             sys.refresh_memory();
-            // Convert bytes to MB
             Ok(Value::Int((sys.free_memory() / 1024 / 1024) as i64))
         },
         "memory_total" => {
@@ -41,30 +52,71 @@ pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
             sys.refresh_memory();
             Ok(Value::Int((sys.total_memory() / 1024 / 1024) as i64))
         },
-        "os_name" => {
+        "os.name" | "os_name" => {
             let name = sysinfo::System::name().unwrap_or("Unknown".into());
-            Ok(Value::Str(name))
+            Ok(ok_res(Value::Str(name)))
+        },
+        "os.arch" => {
+            Ok(ok_res(Value::Str(std::env::consts::ARCH.to_string())))
         },
         "os_version" => {
             let ver = sysinfo::System::os_version().unwrap_or("Unknown".into());
             Ok(Value::Str(ver))
         },
-        "isWindows" => {
-            Ok(Value::Bool(cfg!(target_os = "windows")))
+        "os.isWindows" | "isWindows" => {
+            Ok(Value::Bool(cfg!(windows)))
         },
-        "isLinux" => {
+        "os.isLinux" | "isLinux" => {
             Ok(Value::Bool(cfg!(target_os = "linux")))
         },
-        "isMac" => {
+        "os.isMac" | "isMac" => {
             Ok(Value::Bool(cfg!(target_os = "macos")))
+        },
+        "exec" => {
+            if let Some(Value::Str(cmd)) = args.first() {
+                // Security: Capabilities check should happen at compile-time in sandbox auditor
+                let output = std::process::Command::new(if cfg!(windows) { "cmd.exe" } else { "sh" })
+                    .arg(if cfg!(windows) { "/c" } else { "-c" })
+                    .arg(cmd)
+                    .output();
+                
+                match output {
+                    Ok(out) => {
+                        let mut res = std::collections::HashMap::new();
+                        res.insert("stdout".to_string(), Value::Str(String::from_utf8_lossy(&out.stdout).to_string()));
+                        res.insert("stderr".to_string(), Value::Str(String::from_utf8_lossy(&out.stderr).to_string()));
+                        res.insert("status".to_string(), Value::Int(out.status.code().unwrap_or(-1) as i64));
+                        Ok(ok_res(Value::Map(res)))
+                    }
+                    Err(e) => Ok(err_res(&format!("exec failed: {}", e)))
+                }
+            } else {
+                Ok(err_res("system.exec requires a string command"))
+            }
+        },
+        "thread.spawn" => {
+            Ok(err_res("Not Implemented: thread.spawn requires linear types & ownership handoff"))
+        },
+        "thread.join" => {
+            Ok(err_res("Not Implemented: thread.join"))
+        },
+        "thread.sleep" => {
+            if let Some(n) = args.first() {
+                let ms = n.as_int().unwrap_or(0);
+                std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+                Ok(ok_res(Value::Null))
+            } else {
+                Ok(err_res("system.thread.sleep requires milliseconds (int)"))
+            }
+        },
+        "defer" => {
+            Ok(err_res("Not Implemented: defer requires compiler scope tracking rules"))
         },
         "hostname" => {
             let host = sysinfo::System::host_name().unwrap_or("Unknown".into());
             Ok(Value::Str(host))
         },
         "user_name" => {
-            // sysinfo doesn't easily get current user without iterating processes?
-            // Actually std::env::var("USERNAME") or "USER" is easier/faster.
             let user = std::env::var("USERNAME").or(std::env::var("USER")).unwrap_or("Unknown".into());
             Ok(Value::Str(user))
         },
@@ -72,16 +124,8 @@ pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
             let uptime = sysinfo::System::uptime();
             Ok(Value::Int(uptime as i64))
         },
-        "clipboard_set" => {
-            // Sysinfo doesn't do clipboard. Need a crate like 'arboard'.
-            // For now, return Not Implemented or use a hack.
-            // Request said "Implement Not Implemented".
-            // I didn't add arboard to Cargo.toml.
-            // I'll skip clipboard for now or error.
-            Err("Clipboard not implemented (requires dependency)".into())
-        },
-        "clipboard_get" => {
-            Err("Clipboard not implemented (requires dependency)".into())
+        "clipboard_set" | "clipboard_get" => {
+            Ok(err_res("Clipboard not implemented (requires dependency)"))
         },
         _ => Err(format!("Unknown System function: {}", func_name))
     }

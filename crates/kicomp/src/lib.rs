@@ -24,3 +24,4 @@ pub mod reactive;
 pub mod ir_hash;
 pub mod capability;
 pub mod hir_validate;
+pub mod vtable;

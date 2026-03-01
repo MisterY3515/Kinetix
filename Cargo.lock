@@ -2284,7 +2284,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kinetix-cli"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bumpalo",
  "clap",
@@ -2297,7 +2297,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-installer"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "directories",
  "eframe",
@@ -2311,7 +2311,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kicomp"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bumpalo",
  "clap",
@@ -2323,7 +2323,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-kivm"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "csv",
  "hex",
@@ -2344,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "kinetix-language"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "bumpalo",
  "clap",

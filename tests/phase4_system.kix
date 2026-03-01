@@ -1,0 +1,55 @@
+// phase4_system.kix
+// Test for Build 23: OS Abstraction Layer and System Runtime
+
+fn try_system_apis() {
+    let os_name = system.os.name()
+    let arch = system.os.arch()
+
+    print("OS Name: ")
+    println(os_name.ok)
+    print("Architecture: ")
+    println(arch.ok)
+
+    println("Testing sleep...")
+    system.thread.sleep(500)
+    println("Woke up from 500ms sleep")
+
+    // Test zero-panic errors
+    let th = system.thread.join()
+    print("Join error test: ")
+    println(th.err)
+    
+    // Test exec
+    let res = system.exec("echo hello from kinetix shell")
+    if res.ok != null {
+        println("Exec output:")
+        println(res.ok.stdout)
+    }
+}
+
+class Point {
+    x: int
+    y: int
+
+    fn print(self) {
+        print("Point(")
+        print(self.x)
+        print(", ")
+        print(self.y)
+        println(")")
+    }
+}
+
+fn test_vtable() {
+    let p = Point { x: 10, y: 20 }
+    p.print() // This will exercise the VTable LoadMethod lookup!
+}
+
+fn main() {
+    println("=== Kinetix Build 23 Phase 4 Full System Test ===")
+    try_system_apis()
+    test_vtable()
+    println("All systems operational.")
+}
+
+main()

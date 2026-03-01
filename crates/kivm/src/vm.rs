@@ -600,13 +600,22 @@ impl VM {
                     _ => return Err("LoadMethod: object is not a class instance".into()),
                 };
 
-                // In Kinetix, methods are compiled as "ClassName::methodName"
+                if let Some(vtable) = self.program.vtable.get(&class_name) {
+                    if let Some(&func_idx) = vtable.get(&method_name) {
+                        self.mem_stats.total_heap_allocations += 1;
+                        let func_val = Value::Function(func_idx);
+                        frame.set_reg(instr.a, Value::BoundMethod(Box::new(obj.clone()), Box::new(func_val)));
+                        return Ok(StepResult::Continue);
+                    }
+                }
+
+                // Fallback to legacy string-based dynamic lookup
                 let flat_name = format!("{}::{}", class_name, method_name);
                 if let Some(func_val) = self.globals.get(&flat_name) {
                     self.mem_stats.total_heap_allocations += 1;
                     frame.set_reg(instr.a, Value::BoundMethod(Box::new(obj.clone()), Box::new(func_val.clone())));
                 } else {
-                    return Err(format!("Method '{}' not found on class '{}'", method_name, class_name));
+                    return Err(format!("Method '{}' not found on class '{}' (VTable resolution failed)", method_name, class_name));
                 }
             }
 
