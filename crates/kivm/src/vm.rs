@@ -195,6 +195,70 @@ impl VM {
         self.call_stack.len()
     }
 
+    pub fn clone_program(&self) -> CompiledProgram {
+        self.program.clone()
+    }
+
+    pub fn run_function(&mut self, func: Value, args: Vec<Value>) -> Result<Value, String> {
+        self.call_stack.clear();
+        self.dirty_states.clear();
+
+        // Push a dummy root frame to catch the return value in reg 0
+        let dummy_frame = CallFrame::new(CompiledFunction {
+            instructions: vec![Instruction { opcode: Opcode::Halt, a: 0, b: 0, c: 0 }],
+            constants: vec![],
+            arity: 0,
+            locals: 1, // Only need reg 0 for return value
+            param_names: vec![],
+            line_map: vec![],
+            name: "thread_root".to_string(),
+        }, vec![], None);
+        self.call_stack.push(dummy_frame);
+
+        // Initiate the call
+        self.call_value(func, args, Some(0))?;
+
+        // Inner execution loop
+        loop {
+            if self.call_stack.is_empty() {
+                break;
+            }
+            
+            let result = match self.step() {
+                Ok(r) => r,
+                Err(e) => return Err(self.runtime_error(&e)),
+            };
+            match result {
+                StepResult::Continue => {},
+                StepResult::Halt => break,
+                StepResult::Return(val) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    if let Some(reg) = popped.return_to_reg {
+                        if let Some(parent) = self.call_stack.last_mut() {
+                            parent.set_reg(reg, val);
+                        }
+                    } else {
+                        break; // Main return
+                    }
+                },
+                StepResult::Call(f, a, dest_reg) => {
+                     self.call_value(f, a, Some(dest_reg))?;
+                },
+                StepResult::TailCall(f, a) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    let ret_reg = popped.return_to_reg;
+                    self.call_value(f, a, ret_reg)?;
+                }
+            }
+        }
+
+        if let Some(frame) = self.call_stack.first() {
+            Ok(frame.reg(0).clone())
+        } else {
+            Ok(Value::Null)
+        }
+    }
+
     pub fn run(&mut self) -> Result<(), String> {
         let mut ticks = 0;
         const MAX_TICKS: usize = 1000; // Prevent infinite reactive loops
