@@ -74,6 +74,10 @@ impl Compiler {
         }
         self.program.main.locals = self.max_temp;
         self.emit_instr(Instruction::a_only(Opcode::Halt, 0));
+        
+        // Static VTable Build Post-Monomorphization equivalent for AST pipeline
+        self.program.vtable = crate::vtable::build_vtable(&self.program);
+        
         Ok(&self.program)
     }
 
@@ -336,10 +340,8 @@ impl Compiler {
             Statement::Class { name: class_name, methods, .. } => {
                 for method in methods {
                     if let Statement::Function { name: method_name, parameters, body, .. } = method {
-                        let mut new_params = vec![("self".to_string(), "Object".to_string())];
-                        new_params.extend_from_slice(parameters); // copy the rest
                         let flat_name = format!("{}::{}", class_name, method_name);
-                        self.compile_function(&flat_name, &new_params, body)?;
+                        self.compile_function(&flat_name, parameters, body)?;
                     }
                 }
             }
@@ -414,10 +416,6 @@ impl Compiler {
         let idx_const = self.current_fn().add_constant(Constant::Function(func_idx));
         self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx_const));
         self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_const, reg));
-        self.current_scope_mut().define(name);
-        if self.current_scope_mut().next_register > self.max_temp {
-             self.max_temp = self.current_scope_mut().next_register; 
-        }
 
         Ok(())
     }
@@ -613,16 +611,6 @@ impl Compiler {
                 Ok(val_reg)
             }
             Expression::Call { function, arguments } => {
-                // Intrinsic: print(x)
-                if let Expression::Identifier(name) = *function {
-                    if name == "print" && arguments.len() == 1 {
-                        let arg_reg = self.compile_expression(&arguments[0])?;
-                        self.emit_instr(Instruction::a_only(Opcode::Print, arg_reg));
-                        let null_reg = self.alloc_register();
-                        self.emit_instr(Instruction::a_only(Opcode::LoadNull, null_reg));
-                        return Ok(null_reg);
-                    }
-                }
 
                 // Helper: flatten multi-level MemberAccess into a dot-separated string
                 fn stringify_member_access(expr: &Expression) -> Option<String> {
@@ -641,15 +629,14 @@ impl Compiler {
                     // First, check for multi-level builtin calls like system.os.isWindows()
                     let full_path = stringify_member_access(function);
                     let is_multilevel_builtin = full_path.as_ref().map_or(false, |p| {
-                        p.starts_with("system.os.")
-                            || p.starts_with("system.info.")
+                        p.starts_with("system.") || p.starts_with("Math.") || p.starts_with("math.")
                     });
 
                     if is_multilevel_builtin {
                         let flat_name = full_path.unwrap();
                         let call_reg = self.alloc_register();
                         let name_idx = self.current_fn().add_constant(Constant::String(flat_name));
-                        self.emit_instr(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
+                        self.emit_instr(Instruction::ab(Opcode::GetGlobal, call_reg, name_idx));
                         for (i, arg) in arguments.iter().enumerate() {
                             let expected_reg = call_reg + 1 + i as u16;
                             let arg_reg = self.compile_expression(arg)?;

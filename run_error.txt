@@ -1,0 +1,19 @@
+   Compiling kinetix-kicomp v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\kicomp)
+   Compiling kinetix-kivm v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\kivm)
+   Compiling kinetix-cli v0.0.8 (D:\Progetti\Nevhar\Kinetix\crates\cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.94s
+     Running `target\debug\kivm.exe exec tests/phase4_system.kix`
+DEBUG OP_CALL: func_val = Function(3) at instr.a=4
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=1
+=== Kinetix Build 23 Phase 4 Full System Test ===
+DEBUG OP_CALL: func_val = NativeFn("println") at instr.a=0
+
+DEBUG OP_CALL: func_val = Str("=== Kinetix Build 23 Phase 4 Full System Test ===") at instr.a=0
+
+  Runtime error: Cannot call Str('=== Kinetix Build 23 Phase 4 Full System Test ===') (not expecting a native function)
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.8 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
+error: process didn't exit successfully: `target\debug\kivm.exe exec tests/phase4_system.kix` (exit code: 1)

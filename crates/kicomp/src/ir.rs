@@ -254,6 +254,9 @@ pub struct CompiledProgram {
     pub functions: Vec<CompiledFunction>,
     pub version: String,
     pub reactive_graph: CompiledReactiveGraph,
+    /// Static VTable: maps (class_name, method_name) → function_index
+    #[serde(default)]
+    pub vtable: std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
 }
 
 impl CompiledProgram {
@@ -263,6 +266,7 @@ impl CompiledProgram {
             functions: vec![],
             version: "0.1.0".to_string(), // will be updated by compiler
             reactive_graph: CompiledReactiveGraph::new(),
+            vtable: std::collections::HashMap::new(),
         }
     }
 }
