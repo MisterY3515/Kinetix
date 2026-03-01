@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 22;
+pub const CURRENT_BUILD: i64 = 23;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
@@ -624,15 +624,53 @@ impl Compiler {
                     }
                 }
 
+                // Helper: flatten multi-level MemberAccess into a dot-separated string
+                fn stringify_member_access(expr: &Expression) -> Option<String> {
+                    match expr {
+                        Expression::Identifier(name) => Some(name.clone()),
+                        Expression::MemberAccess { object, member } => {
+                            let parent = stringify_member_access(object)?;
+                            Some(format!("{}.{}", parent, member))
+                        }
+                        _ => None,
+                    }
+                }
+
                 // Module builtins vs Method calling on Instance
                 if let Expression::MemberAccess { object, member } = *function {
+                    // First, check for multi-level builtin calls like system.os.isWindows()
+                    let full_path = stringify_member_access(function);
+                    let is_multilevel_builtin = full_path.as_ref().map_or(false, |p| {
+                        p.starts_with("system.os.")
+                            || p.starts_with("system.info.")
+                    });
+
+                    if is_multilevel_builtin {
+                        let flat_name = full_path.unwrap();
+                        let call_reg = self.alloc_register();
+                        let name_idx = self.current_fn().add_constant(Constant::String(flat_name));
+                        self.emit_instr(Instruction::ab(Opcode::LoadConst, call_reg, name_idx));
+                        for (i, arg) in arguments.iter().enumerate() {
+                            let expected_reg = call_reg + 1 + i as u16;
+                            let arg_reg = self.compile_expression(arg)?;
+                            if arg_reg != expected_reg {
+                                while self.next_temp <= expected_reg {
+                                    self.alloc_register();
+                                }
+                                self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
+                            }
+                        }
+                        self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+                        return Ok(call_reg);
+                    }
+
                     let mut is_local_obj = false;
                     if let Expression::Identifier(name) = &**object {
                         let is_capitalized = name.chars().next().unwrap_or('a').is_uppercase();
                         if self.resolve_use(name)?.is_some() || self.program.reactive_graph.nodes.contains_key(name) {
                             is_local_obj = true;
                         } else if !is_capitalized {
-                            // Se è minucolo ed è globale (es. 'let p = Point...; p.greet()'), NON è un module
+                            // Se è minuscolo ed è globale (es. 'let p = Point...; p.greet()'), NON è un module
                             is_local_obj = true;
                         }
                     } else {

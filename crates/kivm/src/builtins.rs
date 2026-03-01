@@ -26,9 +26,9 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "Math.sin", "Math.cos", "Math.tan", "Math.asin", "Math.acos", "Math.atan2",
     "Math.deg", "Math.rad", "Math.cbrt", "Math.exp", "Math.log", "Math.log10",
     "Math.clamp", "Math.lerp", "Math.min", "Math.max", "Math.random", "Math.random_range", 
-    "math.vector2", "math.vector3", "math.length", "math.length_sq", "math.distance", 
     "math.distance_sq", "math.dot", "math.cross", "math.normalize",
     "System.time", "time.now", "time.ticks", "time.sleep",
+    "system.os.isWindows", "system.os.isLinux", "system.os.isMac",
     "env.get", "env.set", "env.args",
 ];
 
@@ -652,6 +652,11 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
         },
         "bool" => Ok(Value::Bool(args.first().map(|v| v.is_truthy()).unwrap_or(false))),
         
+        // --- OS Detection ---
+        "system.os.isWindows" => Ok(Value::Bool(cfg!(windows))),
+        "system.os.isLinux" => Ok(Value::Bool(cfg!(target_os = "linux"))),
+        "system.os.isMac" => Ok(Value::Bool(cfg!(target_os = "macos"))),
+
         _ => Err(format!("Unknown built-in: {}", name)),
     }
 }
