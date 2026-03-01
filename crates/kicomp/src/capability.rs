@@ -1,11 +1,12 @@
 /// Capability IR Enforcement Pass
 /// 
 /// This module provides a pre-lowering compile-time sandbox verification pass.
-/// It scans the typed HIR for sensitive builtin invocations (File I/O, Network, System Info)
-/// and statically verifies that the target program/module has requested and been granted
-/// the required capabilities. If a violation is found, compilation fails immediately.
+/// It scans the typed HIR for sensitive builtin invocations (File I/O, Network, System Info,
+/// OS Execution, Thread Control) and statically verifies that the target program/module
+/// has requested and been granted the required capabilities.
+/// If a violation is found, compilation fails immediately.
 /// 
-/// In Build 19, this serves as the foundational sandbox gate for Kinetix.
+/// Build 19: Foundation. Build 24: Full coverage on all system.* syscalls.
 
 use crate::hir::*;
 use crate::types::Type;
@@ -17,6 +18,7 @@ pub enum Capability {
     NetAccess,
     SysInfo,
     OsExecute,
+    ThreadControl,
 }
 
 impl std::fmt::Display for Capability {
@@ -27,6 +29,7 @@ impl std::fmt::Display for Capability {
             Capability::NetAccess => write!(f, "NetAccess"),
             Capability::SysInfo => write!(f, "SysInfo"),
             Capability::OsExecute => write!(f, "OsExecute"),
+            Capability::ThreadControl => write!(f, "ThreadControl"),
         }
     }
 }
@@ -103,6 +106,10 @@ impl CapabilityValidator {
                 }
             }
             HirExprKind::Call { function, arguments } => {
+                // Build 24: intercept flattened system.* global calls
+                if let HirExprKind::Identifier(ref name) = function.kind {
+                    self.check_flattened_call(name, line, errors);
+                }
                 self.validate_expr(function, line, errors);
                 for arg in arguments { self.validate_expr(arg, line, errors); }
             }
@@ -169,6 +176,31 @@ impl CapabilityValidator {
             if !self.granted.contains(&cap) {
                 errors.push(CapabilityError {
                     message: format!("Sandbox missing '{}' capability for {}.{}", cap, module, method),
+                    line,
+                });
+            }
+        }
+    }
+
+    /// Build 24: Check flattened multi-level global function calls (e.g. "system.os.name").
+    /// The HIR flattens `system.os.name()` into `Call(Identifier("system.os.name"), args)`.
+    fn check_flattened_call(&self, name: &str, line: usize, errors: &mut Vec<CapabilityError>) {
+        let req = match name {
+            // OS info queries
+            "system.os.name" | "system.os.arch" | "system.os.isWindows" | "system.os.isLinux" | "system.os.isMac" => Some(Capability::SysInfo),
+            // OS execution
+            "system.exec" => Some(Capability::OsExecute),
+            // Thread control
+            "system.thread.spawn" | "system.thread.join" | "system.thread.sleep" => Some(Capability::ThreadControl),
+            // Defer (scope-end RAII)
+            "system.defer" => Some(Capability::ThreadControl),
+            _ => None,
+        };
+
+        if let Some(cap) = req {
+            if !self.granted.contains(&cap) {
+                errors.push(CapabilityError {
+                    message: format!("Sandbox missing '{}' capability for {}", cap, name),
                     line,
                 });
             }
