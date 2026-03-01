@@ -460,6 +460,77 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
             }
         }
         Expression::If { condition, consequence, alternative } => {
+            // Constant Folding per Compile-Time OS branch elimination
+            let mut is_compile_time_const = None;
+            
+            if let Expression::Call { function, arguments } = &**condition {
+                if arguments.is_empty() {
+                    // Check if the callee looks like: `system.os.isWindows`
+                    fn is_os_call(expr: &Expression, method: &str) -> bool {
+                        if let Expression::MemberAccess { object, member } = expr {
+                            if member == method {
+                                if let Expression::MemberAccess { object: inner_obj, member: inner_member } = &**object {
+                                    if inner_member == "os" {
+                                        if let Expression::Identifier(root) = &**inner_obj {
+                                            return root == "system";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        false
+                    }
+
+                    if is_os_call(&**function, "isWindows") {
+                        is_compile_time_const = Some(cfg!(windows));
+                    } else if is_os_call(&**function, "isLinux") {
+                        is_compile_time_const = Some(cfg!(target_os = "linux"));
+                    } else if is_os_call(&**function, "isMac") {
+                        is_compile_time_const = Some(cfg!(target_os = "macos"));
+                    }
+                }
+            }
+
+            // Static Resolution branch dropping
+            if let Some(static_cond) = is_compile_time_const {
+                if static_cond {
+                    // Solo consequence
+                    let cons = lower_statement(consequence, symbols, traits, fresh, env);
+                    let ty = cons.ty.clone();
+                    return HirExpression {
+                        kind: HirExprKind::If {
+                            condition: Box::new(HirExpression { kind: HirExprKind::Boolean(true), ty: Type::Bool }),
+                            consequence: Box::new(cons),
+                            alternative: None, // Il ramo Else svanisce nel nulla
+                        },
+                        ty,
+                    };
+                } else {
+                    // Solo alternative (se esiste), oppure rimpiazzato con un Null.
+                    if let Some(alt) = alternative {
+                        let alt_stmt = lower_statement(alt, symbols, traits, fresh, env);
+                        let ty = alt_stmt.ty.clone();
+                        return HirExpression {
+                            kind: HirExprKind::If {
+                                condition: Box::new(HirExpression { kind: HirExprKind::Boolean(false), ty: Type::Bool }),
+                                consequence: Box::new(HirStatement { 
+                                    kind: HirStmtKind::Expression { expression: HirExpression { kind: HirExprKind::Null, ty: Type::Void } },
+                                    ty: Type::Void,
+                                    line: 0
+                                }),
+                                alternative: Some(Box::new(alt_stmt)),
+                            },
+                            ty,
+                        };
+                    } else {
+                        return HirExpression {
+                            kind: HirExprKind::Null,
+                            ty: Type::Void,
+                        };
+                    }
+                }
+            }
+
             let cond = lower_expression(condition, symbols, traits, fresh, env);
             let cons = lower_statement(consequence, symbols, traits, fresh, env);
             let alt = alternative.as_ref().map(|a| Box::new(lower_statement(a, symbols, traits, fresh, env)));
@@ -471,6 +542,49 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
         }
         Expression::Call { function, arguments } => {
             if let Expression::MemberAccess { object, member } = &**function {
+                // Flatten Builtin Methods at AST Boundary
+                fn stringify_ast_access(expr: &Expression) -> Option<String> {
+                    match expr {
+                        Expression::Identifier(name) => Some(name.clone()),
+                        Expression::MemberAccess { object, member } => {
+                            let base = stringify_ast_access(object)?;
+                            Some(format!("{}.{}", base, member))
+                        }
+                        _ => None
+                    }
+                }
+
+                if let Some(parent_path) = stringify_ast_access(object) {
+                    let full_path = format!("{}.{}", parent_path, member);
+                    let is_builtin = full_path.starts_with("system.") 
+                        || full_path.starts_with("math.") 
+                        || full_path.starts_with("env.")
+                        || full_path.starts_with("str.")
+                        || full_path.starts_with("array.")
+                        || full_path.starts_with("db.")
+                        || full_path.starts_with("crypto.")
+                        || full_path.starts_with("audio.")
+                        || full_path.starts_with("graph.")
+                        || full_path.starts_with("llm.");
+
+                    if is_builtin {
+                        let args: Vec<HirExpression> = arguments.iter()
+                            .map(|a| lower_expression(a, symbols, traits, fresh, env))
+                            .collect();
+                        let ty = fresh.fresh();
+                        return HirExpression {
+                            kind: HirExprKind::Call {
+                                function: Box::new(HirExpression {
+                                    kind: HirExprKind::Identifier(full_path),
+                                    ty: fresh.fresh(),
+                                }),
+                                arguments: args,
+                            },
+                            ty,
+                        };
+                    }
+                }
+
                 let obj = lower_expression(object, symbols, traits, fresh, env);
                 let args: Vec<HirExpression> = arguments.iter()
                     .map(|a| lower_expression(a, symbols, traits, fresh, env))

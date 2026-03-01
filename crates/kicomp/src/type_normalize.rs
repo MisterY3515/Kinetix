@@ -342,8 +342,48 @@ fn resolve_expr(expr: &mut HirExpression, symbols: &SymbolTable, sub: &Substitut
                     return Err(format!("Unrecognized custom type `{}` for method call", class_name));
                 }
             } else {
-                // Not a custom type — might be a builtin method call, leave as-is for now
-                // This allows future extensions for builtin methods on arrays, strings, etc.
+                // Fallback: This is not a resolved Custom Type method call.
+                // It could be a Builtin Module Call (e.g., `system.os.isWindows()`).
+                
+                // Helper per srotolare la chain di MemberAccess
+                fn extract_full_path(expr: &HirExpression) -> Option<String> {
+                    match &expr.kind {
+                        HirExprKind::Identifier(name) => Some(name.clone()),
+                        HirExprKind::MemberAccess { object, member } => {
+                            let parent = extract_full_path(object)?;
+                            Some(format!("{}.{}", parent, member))
+                        }
+                        _ => None
+                    }
+                }
+
+                if let Some(mut temp_kind) = None.or_else(|| {
+                    let mut k = HirExprKind::Null;
+                    std::mem::swap(&mut expr.kind, &mut k);
+                    Some(k)
+                }) {
+                    if let HirExprKind::MethodCall { object: extracted_obj, method: method_name, arguments: ext_args } = temp_kind {
+                        
+                        if let Some(parent_path) = extract_full_path(&extracted_obj) {
+                            // Se riesce ad estrarre parent string type (es: "system" o "system.os")
+                            // Allora lo convertiamo in una chiamata piana "system.os.method"
+                            let fully_qualified_name = format!("{}.{}", parent_path, method_name);
+                            expr.kind = HirExprKind::Call {
+                                function: Box::new(crate::hir::HirExpression {
+                                    kind: HirExprKind::Identifier(fully_qualified_name),
+                                    ty: expr.ty.clone(),
+                                }),
+                                arguments: ext_args,
+                            };
+                            return Ok(());
+                        } else {
+                            // Non estraibile come dot path (es array literal `[1].len()`), lasciamo MethodCall come è
+                            expr.kind = HirExprKind::MethodCall { object: extracted_obj, method: method_name, arguments: ext_args };
+                        }
+                    } else {
+                        std::mem::swap(&mut expr.kind, &mut temp_kind);
+                    }
+                }
             }
         }
         // Recurse into all other expression kinds

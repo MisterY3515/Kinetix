@@ -49,6 +49,15 @@ pub fn call(func_name: &str, _args: &[Value]) -> Result<Value, String> {
             let ver = sysinfo::System::os_version().unwrap_or("Unknown".into());
             Ok(Value::Str(ver))
         },
+        "isWindows" => {
+            Ok(Value::Bool(cfg!(target_os = "windows")))
+        },
+        "isLinux" => {
+            Ok(Value::Bool(cfg!(target_os = "linux")))
+        },
+        "isMac" => {
+            Ok(Value::Bool(cfg!(target_os = "macos")))
+        },
         "hostname" => {
             let host = sysinfo::System::host_name().unwrap_or("Unknown".into());
             Ok(Value::Str(host))
