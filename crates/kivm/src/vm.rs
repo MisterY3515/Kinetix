@@ -107,6 +107,8 @@ struct CallFrame {
     ip: usize,
     registers: Vec<Value>,
     return_to_reg: Option<u16>,
+    /// Deferred closures to execute in LIFO order when this frame is popped.
+    deferred: Vec<Value>,
 }
 
 impl CallFrame {
@@ -126,7 +128,13 @@ impl CallFrame {
             ip: 0,
             registers,
             return_to_reg,
+            deferred: vec![],
         }
+    }
+
+    /// Register a closure to be executed when this frame exits (LIFO order).
+    fn push_defer(&mut self, closure: Value) {
+        self.deferred.push(closure);
     }
 
     fn reg(&self, idx: u16) -> &Value {
@@ -197,6 +205,14 @@ impl VM {
 
     pub fn clone_program(&self) -> CompiledProgram {
         self.program.clone()
+    }
+
+    /// Push a deferred closure onto the current call frame's defer stack.
+    /// The closure will be executed in LIFO order when the frame returns.
+    pub fn push_defer(&mut self, closure: Value) {
+        if let Some(frame) = self.call_stack.last_mut() {
+            frame.push_defer(closure);
+        }
     }
 
     pub fn run_function(&mut self, func: Value, args: Vec<Value>) -> Result<Value, String> {
@@ -287,6 +303,31 @@ impl VM {
                     StepResult::Halt => break,
                     StepResult::Return(val) => {
                         let popped = self.call_stack.pop().expect("Stack underflow");
+                        // Execute deferred closures in LIFO order (Build 26)
+                        let deferred_closures: Vec<Value> = popped.deferred.into_iter().rev().collect();
+                        for closure in deferred_closures {
+                            // Fire-and-forget: deferred closures cannot fail the caller
+                            let _ = self.call_value(closure.clone(), vec![], None);
+                            // Run the deferred closure to completion within the current execution loop
+                            loop {
+                                if self.call_stack.is_empty() { break; }
+                                match self.step() {
+                                    Ok(StepResult::Continue) => {},
+                                    Ok(StepResult::Halt) => break,
+                                    Ok(StepResult::Return(_)) => {
+                                        self.call_stack.pop();
+                                        break;
+                                    },
+                                    Ok(StepResult::Call(f, a, d)) => { let _ = self.call_value(f, a, Some(d)); },
+                                    Ok(StepResult::TailCall(f, a)) => {
+                                        let p = self.call_stack.pop().expect("Stack underflow");
+                                        let r = p.return_to_reg;
+                                        let _ = self.call_value(f, a, r);
+                                    },
+                                    Err(_) => break, // Swallow deferred errors silently
+                                }
+                            }
+                        }
                         if let Some(reg) = popped.return_to_reg {
                             if let Some(parent) = self.call_stack.last_mut() {
                                 parent.set_reg(reg, val);

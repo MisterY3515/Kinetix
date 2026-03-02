@@ -723,6 +723,20 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
                 return Ok(modules::system::call("thread.join", args)?); // Error path fallback
             }
         },
+        "system.defer" => {
+            // Build 26: Register a deferred closure on the current call frame
+            if let Some(closure) = args.first() {
+                match closure {
+                    Value::Function(_) | Value::NativeFn(_) => {
+                        vm.push_defer(closure.clone());
+                        Ok(Value::Null)
+                    },
+                    _ => Err("system.defer requires a function argument".to_string()),
+                }
+            } else {
+                Err("system.defer requires a function argument".to_string())
+            }
+        },
         name if name.starts_with("system.") => modules::system::call(&name[7..], args),
 
         _ => Err(format!("Unknown built-in: {}", name)),

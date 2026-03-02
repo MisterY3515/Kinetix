@@ -184,6 +184,7 @@ impl CapabilityValidator {
 
     /// Build 24: Check flattened multi-level global function calls (e.g. "system.os.name").
     /// The HIR flattens `system.os.name()` into `Call(Identifier("system.os.name"), args)`.
+    /// Build 26: Extended audit — covers all BUILTIN_NAMES syscall surface.
     fn check_flattened_call(&self, name: &str, line: usize, errors: &mut Vec<CapabilityError>) {
         let req = match name {
             // OS info queries
@@ -194,6 +195,10 @@ impl CapabilityValidator {
             "system.thread.spawn" | "system.thread.join" | "system.thread.sleep" => Some(Capability::ThreadControl),
             // Defer (scope-end RAII)
             "system.defer" => Some(Capability::ThreadControl),
+            // Environment access (Build 26 audit)
+            "env.get" | "env.set" | "env.args" => Some(Capability::SysInfo),
+            // Time/System info (Build 26 audit)
+            "System.time" | "time.now" | "time.ticks" | "time.sleep" => Some(Capability::SysInfo),
             _ => None,
         };
 
@@ -206,4 +211,45 @@ impl CapabilityValidator {
             }
         }
     }
+}
+
+/// Build 26: Static Syscall Map — compile-time export of all syscall→capability mappings.
+/// Used for documentation, tooling and audit trail generation.
+pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
+    vec![
+        // Filesystem
+        ("data.read_text", Capability::FsRead),
+        ("data.read_bytes", Capability::FsRead),
+        ("data.exists", Capability::FsRead),
+        ("data.list_dir", Capability::FsRead),
+        ("data.copy", Capability::FsRead),
+        ("data.write_text", Capability::FsWrite),
+        ("db.connect", Capability::FsRead),
+        ("db.query", Capability::FsRead),
+        ("db.execute", Capability::FsRead),
+        // Network
+        ("net.get", Capability::NetAccess),
+        ("net.post", Capability::NetAccess),
+        ("net.download", Capability::NetAccess),
+        // SysInfo
+        ("system.os.name", Capability::SysInfo),
+        ("system.os.arch", Capability::SysInfo),
+        ("system.os.isWindows", Capability::SysInfo),
+        ("system.os.isLinux", Capability::SysInfo),
+        ("system.os.isMac", Capability::SysInfo),
+        ("env.get", Capability::SysInfo),
+        ("env.set", Capability::SysInfo),
+        ("env.args", Capability::SysInfo),
+        ("System.time", Capability::SysInfo),
+        ("time.now", Capability::SysInfo),
+        ("time.ticks", Capability::SysInfo),
+        ("time.sleep", Capability::SysInfo),
+        // OS Execution
+        ("system.exec", Capability::OsExecute),
+        // Thread / Defer
+        ("system.thread.spawn", Capability::ThreadControl),
+        ("system.thread.join", Capability::ThreadControl),
+        ("system.thread.sleep", Capability::ThreadControl),
+        ("system.defer", Capability::ThreadControl),
+    ]
 }

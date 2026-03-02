@@ -110,7 +110,8 @@ pub fn call(func_name: &str, args: &[Value]) -> Result<Value, String> {
             }
         },
         "defer" => {
-            Ok(err_res("Not Implemented: defer requires compiler scope tracking rules"))
+            // Handled by builtins.rs interceptor (Build 26)
+            Ok(Value::Null)
         },
         "hostname" => {
             let host = sysinfo::System::host_name().unwrap_or("Unknown".into());
