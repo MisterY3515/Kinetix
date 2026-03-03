@@ -40,6 +40,12 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "system.os.name", "system.os.arch", "system.exec",
     "system.thread.spawn", "system.thread.join", "system.thread.sleep", "system.defer",
     "env.get", "env.set", "env.args",
+    // Net TCP/UDP (Build 28)
+    "net.tcp.connect", "net.tcp.listen", "net.tcp.accept", "net.tcp.send", "net.tcp.recv",
+    "net.tcp.recvLine", "net.tcp.setTimeout", "net.tcp.setNoDelay", "net.tcp.shutdown", "net.tcp.close",
+    "net.tcp.localAddr", "net.tcp.peerAddr",
+    "net.udp.bind", "net.udp.send", "net.udp.recv", "net.udp.setTimeout", "net.udp.close",
+    "net.http.get", "net.http.post", "net.http.download", "net.resolve",
 ];
 
 use crate::vm::VM;
@@ -362,13 +368,14 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
         },
 
         // --- Net Module ---
+        s if s.starts_with("net.") => {
+            let func = s.strip_prefix("net.").unwrap();
+            modules::net::call(func, args)
+        },
         s if s.starts_with("Net.") => {
             let func = s.strip_prefix("Net.").unwrap();
             modules::net::call(func, args)
         },
-         "net.get" => modules::net::call("get", args),
-         "net.post" => modules::net::call("post", args),
-         "net.download" => modules::net::call("download", args),
 
         // --- Crypto Module ---
         s if s.starts_with("Crypto.") => {

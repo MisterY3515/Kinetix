@@ -23,6 +23,7 @@ pub struct Parser<'src, 'arena> {
     peek_token: Token,
     pub errors: Vec<String>,
     allow_struct_literal: bool,
+    peek_space_before: bool,
 }
 
 impl<'src, 'arena> Parser<'src, 'arena> {
@@ -34,6 +35,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             peek_token: Token::EOF,
             errors: vec![],
             allow_struct_literal: true,
+            peek_space_before: false,
         };
         p.next_token();
         p.next_token();
@@ -43,6 +45,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     pub fn next_token(&mut self) {
         self.cur_token = self.peek_token.clone();
         self.peek_token = self.lexer.next_token();
+        self.peek_space_before = self.lexer.space_before_current();
     }
 
     pub fn parse_program(&mut self) -> Program<'arena> {
@@ -128,7 +131,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 let value = if self.peek_token == Token::Equal {
                     self.next_token(); // consume =
                     self.next_token(); // move to expression
-                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    let expr = self.parse_expression(Precedence::Lowest, true)?;
                     if self.peek_token == Token::Semicolon {
                         self.next_token();
                     }
@@ -183,7 +186,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 let value = if self.peek_token == Token::Equal {
                     self.next_token(); // consume =
                     self.next_token(); // move to expression
-                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    let expr = self.parse_expression(Precedence::Lowest, true)?;
                     if self.peek_token == Token::Semicolon {
                         self.next_token();
                     }
@@ -238,7 +241,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 let value = if self.peek_token == Token::Equal {
                     self.next_token(); // consume =
                     self.next_token(); // move to expression
-                    let expr = self.parse_expression(Precedence::Lowest)?;
+                    let expr = self.parse_expression(Precedence::Lowest, true)?;
                     if self.peek_token == Token::Semicolon {
                         self.next_token();
                     }
@@ -375,14 +378,14 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         let start_line = self.lexer.line;
         self.next_token(); 
         
-        let value = if self.cur_token == Token::Semicolon || self.cur_token == Token::RBrace {
-             None 
+        let value = if self.cur_token == Token::Semicolon {
+            None
         } else {
-             let expr = self.parse_expression(Precedence::Lowest)?;
-             if self.peek_token == Token::Semicolon {
-                 self.next_token();
-             }
-             Some(expr)
+            let expr = self.parse_expression(Precedence::Lowest, true)?;
+            if self.peek_token == Token::Semicolon {
+                self.next_token();
+            }
+            Some(expr)
         };
 
         Some(Statement::Return { value, line: start_line })
@@ -395,7 +398,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         let prev_allow = self.allow_struct_literal;
         self.allow_struct_literal = false;
-        let condition = self.parse_expression(Precedence::Lowest)?;
+        let condition = self.parse_expression(Precedence::Lowest, false)?;
         self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
@@ -424,7 +427,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         let prev_allow = self.allow_struct_literal;
         self.allow_struct_literal = false;
-        let range = self.parse_expression(Precedence::Lowest)?;
+        let range = self.parse_expression(Precedence::Lowest, false)?;
         self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
@@ -782,7 +785,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     fn parse_expression_statement(&mut self) -> Option<Statement<'arena>> {
         let start_line = self.lexer.line;
-        let expr = self.parse_expression(Precedence::Lowest)?;
+        // In un Expression_Statement, permetto formati holy shell
+        let expr = self.parse_expression(Precedence::Lowest, true)?;
         
         if self.peek_token == Token::Semicolon {
             self.next_token();
@@ -792,7 +796,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     }
 
     // --- Expression Parsing ---
-    fn parse_expression(&mut self, precedence: Precedence) -> Option<Expression<'arena>> {
+    fn parse_expression(&mut self, precedence: Precedence, allow_holy: bool) -> Option<Expression<'arena>> {
         let mut left = self.parse_prefix()?;
 
         // Assignment: if next token is = and we parsed an identifier or member access
@@ -801,7 +805,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 Expression::Identifier(_) | Expression::MemberAccess { .. } | Expression::Index { .. } => {
                     self.next_token(); // consume =
                     self.next_token(); // move to value
-                    let value = self.parse_expression(Precedence::Lowest)?;
+                    let value = self.parse_expression(Precedence::Lowest, true)?;
                     return Some(Expression::Assign {
                         target: self.arena.alloc(left),
                         value: self.arena.alloc(value),
@@ -815,6 +819,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
               && self.peek_token != Token::LBrace
               && precedence < self.peek_precedence() 
         {
+            // If peek is LBracket but preceded by space, and we're in Holy-Shell context,
+            // DO NOT parse it as an Index. Let Holy-Shell take it as an argument ArrayLiteral.
+            if self.peek_token == Token::LBracket && self.peek_space_before {
+                break;
+            }
+
             match self.peek_token {
                 Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Percent |
                 Token::EqualEqual | Token::NotEqual | Token::Less | Token::Greater |
@@ -824,9 +834,81 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     self.next_token();
                     left = self.parse_infix(left)?;
                 },
-                _ => return Some(left),
+                _ => break,
             }
         }
+        
+        // --- Optional Parentheses (Holy-Shell style) ---
+        // If we parsed an identifier or member access, and the NEXT token is an expression-starter
+        // AND it's on the same line, parse it as a function call.
+        if allow_holy && precedence <= Precedence::Lowest {
+            if let Expression::Identifier(_) | Expression::MemberAccess { .. } = &left {
+                // Check if the current peek_token is a token that can start a primary expression
+                // and it is on the SAME line as the identifier/member access.
+                // We don't have exact line numbers for the peek token easily without checking
+                // the lexer's state. But we know `cur_token` line is `self.lexer.line`.
+                // If there's no newline between `self.cur_token` and `self.peek_token`, then `self.lexer.line`
+                // should be the same as the line where the expression started.
+                // We'll approximate: we parse arguments until a newline or a delimiter token.
+                
+                let is_arg_starter = match &self.peek_token {
+                    Token::Identifier(_) | Token::Integer(_) | Token::Float(_) | 
+                    Token::String(_) | Token::BacktickString(_) | Token::True | 
+                    Token::False | Token::Null | Token::LBracket | Token::Minus | Token::Bang => true,
+                    _ => false,
+                };
+
+                // The lexer.line changes strictly when \n is consumed by read_char().
+                // To be truly Holy-shell, we'd need to trace line numbers per token. We'll use a heuristic:
+                // If it looks like an argument starter, consume it as arguments unless it hits Semicolon or RBrace.
+                if is_arg_starter {
+                    let mut args = vec![];
+                    
+                    let call_line = self.lexer.line; // The line we started parsing this function call.
+                    
+                    while match &self.peek_token {
+                        Token::Identifier(_) | Token::Integer(_) | Token::Float(_) | 
+                        Token::String(_) | Token::BacktickString(_) | Token::True | 
+                        Token::False | Token::Null | Token::LBracket | Token::Minus | Token::Bang => true,
+                        // Allow unary expressions as arguments
+                        _ => false,
+                    } {
+                        if self.lexer.line > call_line {
+                            // The next token is on a new line, stop parsing arguments without parens.
+                            break;
+                        }
+                        
+                        self.next_token();
+                        if let Some(arg) = self.parse_expression(Precedence::Lowest, false) {
+                            args.push(arg);
+                        } else {
+                            break;
+                        }
+                        
+                        // In Holy-Shell style, arguments are space-separated or comma-separated.
+                        // Wait, `parse_expression` will consume everything up to a precedence boundary.
+                        // Commas have lowest precedence, so `parse_expression` stops at a comma.
+                        // If it stops at a comma, it's either separating Holy-shell args or it's a syntax error.
+                        // We consume it here so the loop can parse the next argument.
+                        if self.peek_token == Token::Comma {
+                            self.next_token();
+                        }
+                        
+                        if self.lexer.line > call_line {
+                            break;
+                        }
+                    }
+                    
+                    if !args.is_empty() {
+                         left = Expression::Call {
+                             function: self.arena.alloc(left),
+                             arguments: args,
+                         };
+                    }
+                }
+            }
+        }
+        
         Some(left)
     }
 
@@ -842,13 +924,25 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::Integer(val) => Some(Expression::Integer(*val)),
             Token::Float(val) => Some(Expression::Float(*val)),
             Token::String(val) => Some(Expression::String(val.clone())),
+            Token::BacktickString(val) => {
+                let system_ident = Expression::Identifier("system".to_string());
+                let member_access = Expression::MemberAccess {
+                    object: self.arena.alloc(system_ident),
+                    member: "exec".to_string(),
+                };
+                let arg = Expression::String(val.clone());
+                Some(Expression::Call {
+                    function: self.arena.alloc(member_access),
+                    arguments: vec![arg],
+                })
+            },
             Token::True => Some(Expression::Boolean(true)),
             Token::False => Some(Expression::Boolean(false)),
             Token::Null => Some(Expression::Null),
             Token::Minus | Token::Bang => {
                 let op = if self.cur_token == Token::Minus { "-" } else { "!" }.to_string();
                 self.next_token();
-                let right = self.parse_expression(Precedence::Prefix)?;
+                let right = self.parse_expression(Precedence::Prefix, false)?;
                 Some(Expression::Prefix { operator: op, right: self.arena.alloc(right) })
             },
             Token::Ampersand => {
@@ -858,12 +952,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                     op = "&mut".to_string();
                     self.next_token();
                 }
-                let right = self.parse_expression(Precedence::Prefix)?;
+                let right = self.parse_expression(Precedence::Prefix, false)?;
                 Some(Expression::Prefix { operator: op, right: self.arena.alloc(right) })
             },
             Token::LParen => {
                 self.next_token();
-                let expr = self.parse_expression(Precedence::Lowest)?;
+                let expr = self.parse_expression(Precedence::Lowest, true)?;
                 if !self.expect_peek(Token::RParen) { return None; }
                 Some(expr)
             },
@@ -900,7 +994,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             Token::DotDot => {
                 let precedence = self.cur_precedence();
                 self.next_token();
-                let end = self.parse_expression(precedence)?;
+                let end = self.parse_expression(precedence, false)?;
                 return Some(Expression::Range {
                     start: self.arena.alloc(left),
                     end: self.arena.alloc(end),
@@ -928,7 +1022,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
         let precedence = self.cur_precedence();
         self.next_token();
-        let right = self.parse_expression(precedence)?;
+        let right = self.parse_expression(precedence, false)?;
 
         Some(Expression::Infix {
             left: self.arena.alloc(left),
@@ -944,7 +1038,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     
     fn parse_index_expression(&mut self, left: Expression<'arena>) -> Option<Expression<'arena>> {
         self.next_token();
-        let index = self.parse_expression(Precedence::Lowest)?;
+        let index = self.parse_expression(Precedence::Lowest, false)?;
         if !self.expect_peek(Token::RBracket) { return None; }
         Some(Expression::Index { left: self.arena.alloc(left), index: self.arena.alloc(index) })
     }
@@ -973,7 +1067,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             if !self.expect_peek(Token::Colon) { return None; }
             self.next_token(); // advance to value
             
-            let value = self.parse_expression(Precedence::Lowest)?;
+            let value = self.parse_expression(Precedence::Lowest, false)?;
             fields.push((field_name, value));
             
             if self.peek_token == Token::Comma {
@@ -995,12 +1089,12 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         }
 
         self.next_token();
-        list.push(self.parse_expression(Precedence::Lowest)?);
+        list.push(self.parse_expression(Precedence::Lowest, false)?);
 
         while self.peek_token == Token::Comma {
             self.next_token();
             self.next_token();
-            list.push(self.parse_expression(Precedence::Lowest)?);
+            list.push(self.parse_expression(Precedence::Lowest, false)?);
         }
 
         if !self.expect_peek(end_token) { return None; }
@@ -1012,7 +1106,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         let prev_allow = self.allow_struct_literal;
         self.allow_struct_literal = false;
-        let condition = self.parse_expression(Precedence::Lowest)?;
+        let condition = self.parse_expression(Precedence::Lowest, false)?;
         self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
@@ -1048,7 +1142,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         let prev_allow = self.allow_struct_literal;
         self.allow_struct_literal = false;
-        let value = self.parse_expression(Precedence::Lowest)?;
+        let value = self.parse_expression(Precedence::Lowest, false)?;
         self.allow_struct_literal = prev_allow;
         
         if !self.expect_peek(Token::LBrace) { return None; }
@@ -1056,7 +1150,7 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         
         let mut arms = vec![];
         while self.cur_token != Token::RBrace && self.cur_token != Token::EOF {
-            let pattern = self.parse_expression(Precedence::Lowest)?;
+            let pattern = self.parse_expression(Precedence::Lowest, false)?;
             if !self.expect_peek(Token::FatArrow) { return None; }
             self.next_token(); // advance to start of expression/statement
             
@@ -1535,5 +1629,143 @@ mod tests {
         println!("  Throughput:  {} lines/sec", lines_per_sec);
         println!("  Throughput:  {:.1} MB/sec", bytes_per_sec as f64 / 1_048_576.0);
         println!("══════════════════════════════════════════\n");
+    }
+
+    #[test]
+    fn test_holy_shell_optional_parens() {
+        let arena = Bump::new();
+        let l = Lexer::new("print \"Hello\";\nlet x = len [1, 2, 3];\nfoo bar baz;");
+        let mut p = Parser::new(l, &arena);
+        let prog = p.parse_program();
+        assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
+        assert_eq!(prog.statements.len(), 3);
+        
+        // 1. print "Hello" -> Call(print, ["Hello"])
+        match &prog.statements[0] {
+            Statement::Expression { expression, .. } => {
+                match expression {
+                    Expression::Call { function, arguments } => {
+                        match &**function {
+                            Expression::Identifier(name) => assert_eq!(name, "print"),
+                            _ => panic!("Expected identifier 'print'"),
+                        }
+                        assert_eq!(arguments.len(), 1);
+                        match &arguments[0] {
+                            Expression::String(s) => assert_eq!(s, "Hello"),
+                            _ => panic!("Expected string argument"),
+                        }
+                    },
+                    _ => panic!("Expected call expression"),
+                }
+            },
+            _ => panic!("Expected expression statement"),
+        }
+        
+        // 2. let x = len [1, 2, 3] -> Let(x, Call(len, [ArrayLiteral]))
+        match &prog.statements[1] {
+            Statement::Let { value, .. } => {
+                match value {
+                    Expression::Call { function, arguments } => {
+                        match &**function {
+                            Expression::Identifier(name) => assert_eq!(name, "len"),
+                            _ => panic!("Expected identifier 'len'"),
+                        }
+                        assert_eq!(arguments.len(), 1);
+                        assert!(matches!(&arguments[0], Expression::ArrayLiteral(_)));
+                    },
+                    _ => panic!("Expected call expression"),
+                }
+            },
+            _ => panic!("Expected let statement"),
+        }
+        
+        // 3. foo bar baz -> Call(foo, [bar, baz])
+        match &prog.statements[2] {
+            Statement::Expression { expression, .. } => {
+                match expression {
+                    Expression::Call { function, arguments } => {
+                        match &**function {
+                            Expression::Identifier(name) => assert_eq!(name, "foo"),
+                            _ => panic!("Expected identifier 'foo'"),
+                        }
+                        assert_eq!(arguments.len(), 2);
+                        match &arguments[0] {
+                            Expression::Identifier(name) => assert_eq!(name, "bar"),
+                            _ => panic!("Expected identifier 'bar'"),
+                        }
+                        match &arguments[1] {
+                            Expression::Identifier(name) => assert_eq!(name, "baz"),
+                            _ => panic!("Expected identifier 'baz'"),
+                        }
+                    },
+                    _ => panic!("Expected call expression"),
+                }
+            },
+            _ => panic!("Expected expression statement"),
+        }
+    }
+
+    #[test]
+    fn test_backticks_operator() {
+        let arena = Bump::new();
+        let l = Lexer::new("let files = `ls -la`;\n`echo hello`;");
+        let mut p = Parser::new(l, &arena);
+        let prog = p.parse_program();
+        assert!(p.errors.is_empty(), "Parser errors: {:?}", p.errors);
+        assert_eq!(prog.statements.len(), 2);
+        
+        // 1. let files = `ls -la` -> Let(files, Call(system.exec, ["ls -la"]))
+        match &prog.statements[0] {
+            Statement::Let { value, .. } => {
+                match value {
+                    Expression::Call { function, arguments } => {
+                        match &**function {
+                            Expression::MemberAccess { object, member } => {
+                                match &**object {
+                                    Expression::Identifier(name) => assert_eq!(name, "system"),
+                                    _ => panic!("Expected identifier 'system'"),
+                                }
+                                assert_eq!(member, "exec");
+                            },
+                            _ => panic!("Expected MemberAccess"),
+                        }
+                        assert_eq!(arguments.len(), 1);
+                        match &arguments[0] {
+                            Expression::String(s) => assert_eq!(s, "ls -la"),
+                            _ => panic!("Expected string argument"),
+                        }
+                    },
+                    _ => panic!("Expected call expression"),
+                }
+            },
+            _ => panic!("Expected let statement"),
+        }
+
+        // 2. `echo hello` -> Expression(Call(system.exec, ["echo hello"]))
+        match &prog.statements[1] {
+            Statement::Expression { expression, .. } => {
+                match expression {
+                    Expression::Call { function, arguments } => {
+                        match &**function {
+                            Expression::MemberAccess { object, member } => {
+                                match &**object {
+                                    Expression::Identifier(name) => assert_eq!(name, "system"),
+                                    _ => panic!("Expected identifier 'system'"),
+                                }
+                                assert_eq!(member, "exec");
+                            },
+                            _ => panic!("Expected MemberAccess"),
+                        }
+                        assert_eq!(arguments.len(), 1);
+                        match &arguments[0] {
+                            Expression::String(s) => assert_eq!(s, "echo hello"),
+                            _ => panic!("Expected string argument"),
+                        }
+                    },
+                    _ => panic!("Expected call expression"),
+                }
+            },
+            _ => panic!("Expected Expression statement"),
+        }
     }
 }
