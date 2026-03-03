@@ -200,8 +200,11 @@ impl CapabilityValidator {
             "env.get" | "env.set" | "env.args" => Some(Capability::SysInfo),
             // Time/System info (Build 26 audit)
             "System.time" | "time.now" | "time.ticks" | "time.sleep" => Some(Capability::SysInfo),
+<<<<<<< HEAD
             // Net TCP/UDP/HTTP (Build 28)
             s if s.starts_with("net.tcp.") || s.starts_with("net.udp.") || s.starts_with("net.http.") || s == "net.resolve" => Some(Capability::NetAccess),
+=======
+>>>>>>> origin/main
             _ => None,
         };
 
@@ -254,6 +257,7 @@ pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
         ("system.thread.join", Capability::ThreadControl),
         ("system.thread.sleep", Capability::ThreadControl),
         ("system.defer", Capability::ThreadControl),
+<<<<<<< HEAD
         // Net TCP/UDP (Build 28)
         ("net.tcp.connect", Capability::NetAccess),
         ("net.tcp.listen", Capability::NetAccess),
@@ -276,5 +280,7 @@ pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
         ("net.http.post", Capability::NetAccess),
         ("net.http.download", Capability::NetAccess),
         ("net.resolve", Capability::NetAccess),
+=======
+>>>>>>> origin/main
     ]
 }
