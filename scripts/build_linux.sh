@@ -1,11 +1,7 @@
 #!/bin/bash
 # Build script for Linux
 set -e
-<<<<<<< HEAD
 export KINETIX_BUILD="28"
-=======
-export KINETIX_BUILD="26"
->>>>>>> origin/main
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."
