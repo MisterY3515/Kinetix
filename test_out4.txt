@@ -1,20 +1,3 @@
-warning: unused variable: `prog`
-    --> crates\language\src\parser\mod.rs:1293:13
-     |
-1293 | ...et prog = ...
-     |       ^^^^ help: if this is intentional, prefix it with an underscore: `_prog`
-     |
-     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-
-warning: function `parse` is never used
-    --> crates\language\src\parser\mod.rs:1286:8
-     |
-1286 | ...fn parse(in...
-     |       ^^^^^
-     |
-     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-
-warning: `kinetix-language` (bin "kinetix-lang" test) generated 2 warnings (run `cargo fix --bin "kinetix-lang" -p kinetix-language --tests` to apply 1 suggestion)
 warning: unused import: `CompiledReactiveGraph`
   --> crates\kicomp\src\vtable.rs:72:56
    |
@@ -33,9 +16,26 @@ warning: variable does not need to be mutable
    |
    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
 
+warning: unused variable: `prog`
+    --> crates\language\src\parser\mod.rs:1303:13
+     |
+1303 | ...et prog = ...
+     |       ^^^^ help: if this is intentional, prefix it with an underscore: `_prog`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `parse` is never used
+    --> crates\language\src\parser\mod.rs:1296:8
+     |
+1296 | ...fn parse(in...
+     |       ^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
 warning: `kinetix-kicomp` (lib test) generated 2 warnings (run `cargo fix --lib -p kinetix-kicomp --tests` to apply 2 suggestions)
+warning: `kinetix-language` (bin "kinetix-lang" test) generated 2 warnings (run `cargo fix --bin "kinetix-lang" -p kinetix-language --tests` to apply 1 suggestion)
 warning: `kinetix-language` (lib test) generated 2 warnings (2 duplicates)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.37s
      Running unittests src\main.rs (target\debug\deps\kivm-416d233e435d1aee.exe)
 
 running 0 tests
@@ -69,8 +69,10 @@ failures:
 
 ---- parser::tests::test_holy_shell_optional_parens stdout ----
 
-thread 'parser::tests::test_holy_shell_optional_parens' (67764) panicked at crates\language\src\parser\mod.rs:1630:9:
-Parser errors: ["Line 2: Expected next token to be RBracket, got Comma instead", "Line 2: No prefix parse function for Comma", "Line 2: No prefix parse function for Comma", "Line 2: No prefix parse function for RBracket", "Line 3: No prefix parse function for Semicolon"]
+thread 'parser::tests::test_holy_shell_optional_parens' (68772) panicked at crates\language\src\parser\mod.rs:1641:9:
+assertion `left == right` failed
+  left: 4
+ right: 3
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 
 

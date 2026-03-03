@@ -35,6 +35,7 @@ pub enum Token {
     Integer(i64),
     Float(f64),
     String(String),
+    BacktickString(String),
     
     // Operators
     Plus,
@@ -81,19 +82,26 @@ pub struct Lexer<'a> {
     read_position: usize,
     ch: Option<char>,
     pub line: usize,
+    last_was_space: bool, // Renamed from space_before_current
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        let mut l = Lexer {
+        let mut lexer = Lexer {
             input,
             position: 0,
             read_position: 0,
             ch: None,
             line: 1,
+            last_was_space: false, // Initialized the new field
         };
-        l.read_char();
-        l
+        lexer.read_char();
+        lexer
+    }
+
+    // New public method to read the last_was_space flag
+    pub fn space_before_current(&self) -> bool {
+        self.last_was_space
     }
 
     fn read_char(&mut self) {
@@ -122,8 +130,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
+        self.last_was_space = false;
         while let Some(ch) = self.ch {
             if ch.is_whitespace() {
+                if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+                    self.last_was_space = true;
+                }
                 self.read_char();
             } else {
                 break;
@@ -237,6 +249,7 @@ impl<'a> Lexer<'a> {
                 }
             },
             Some('"') => return self.read_string(),
+            Some('`') => return self.read_backtick_string(),
             Some(ch) => {
                 if is_letter(ch) {
                     let ident = self.read_identifier();
@@ -347,6 +360,28 @@ impl<'a> Lexer<'a> {
         // Consume closing " so next call to next_token starts fresh
         self.read_char();
         Token::String(str_val.to_string())
+    }
+
+    fn read_backtick_string(&mut self) -> Token {
+        let position = self.position + 1;
+        self.read_char(); // Consume opening `
+        
+        loop {
+            match self.ch {
+                Some('`') => break,
+                Some('\\') => {
+                    self.read_char(); 
+                    self.read_char(); 
+                }
+                 None => break, 
+                _ => self.read_char(),
+            }
+        }
+        
+        let str_val = &self.input[position..self.position];
+        // Consume closing ` so next call to next_token starts fresh
+        self.read_char();
+        Token::BacktickString(str_val.to_string())
     }
 }
 
