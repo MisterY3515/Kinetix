@@ -169,6 +169,7 @@ impl CapabilityValidator {
             ("db_conn", _) => Some(Capability::FsRead),
             // Net
             ("net", "get" | "post" | "download") => Some(Capability::NetAccess),
+            ("net", s) if s.starts_with("tcp.") || s.starts_with("udp.") || s.starts_with("http.") => Some(Capability::NetAccess),
             _ => None,
         };
 
@@ -199,6 +200,8 @@ impl CapabilityValidator {
             "env.get" | "env.set" | "env.args" => Some(Capability::SysInfo),
             // Time/System info (Build 26 audit)
             "System.time" | "time.now" | "time.ticks" | "time.sleep" => Some(Capability::SysInfo),
+            // Net TCP/UDP/HTTP (Build 28)
+            s if s.starts_with("net.tcp.") || s.starts_with("net.udp.") || s.starts_with("net.http.") || s == "net.resolve" => Some(Capability::NetAccess),
             _ => None,
         };
 
@@ -251,5 +254,27 @@ pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
         ("system.thread.join", Capability::ThreadControl),
         ("system.thread.sleep", Capability::ThreadControl),
         ("system.defer", Capability::ThreadControl),
+        // Net TCP/UDP (Build 28)
+        ("net.tcp.connect", Capability::NetAccess),
+        ("net.tcp.listen", Capability::NetAccess),
+        ("net.tcp.accept", Capability::NetAccess),
+        ("net.tcp.send", Capability::NetAccess),
+        ("net.tcp.recv", Capability::NetAccess),
+        ("net.tcp.recvLine", Capability::NetAccess),
+        ("net.tcp.setTimeout", Capability::NetAccess),
+        ("net.tcp.setNoDelay", Capability::NetAccess),
+        ("net.tcp.shutdown", Capability::NetAccess),
+        ("net.tcp.close", Capability::NetAccess),
+        ("net.tcp.localAddr", Capability::NetAccess),
+        ("net.tcp.peerAddr", Capability::NetAccess),
+        ("net.udp.bind", Capability::NetAccess),
+        ("net.udp.send", Capability::NetAccess),
+        ("net.udp.recv", Capability::NetAccess),
+        ("net.udp.setTimeout", Capability::NetAccess),
+        ("net.udp.close", Capability::NetAccess),
+        ("net.http.get", Capability::NetAccess),
+        ("net.http.post", Capability::NetAccess),
+        ("net.http.download", Capability::NetAccess),
+        ("net.resolve", Capability::NetAccess),
     ]
 }
