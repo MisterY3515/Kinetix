@@ -132,6 +132,141 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
         },
 
 
+        // --- Directory IO (data.dir.*) ---
+        s if s.starts_with("dir.") => {
+            let sub_cmd = s.strip_prefix("dir.").unwrap();
+            
+            // Ri-utilizzo l'helper sanitize_path già incluso precedentemente o lo duplico logicamente per comodità 
+            // se isolato nello scope (Rust scope shadowing), ma qui usiamo l'implementazione inline rapida.
+            fn sanitize_path(input_path: &str) -> Result<std::path::PathBuf, String> {
+                let path = Path::new(input_path);
+                for component in path.components() {
+                    match component {
+                        std::path::Component::ParentDir => return Err("Security Error: Path traversal ('..') is strict.".to_string()),
+                        std::path::Component::RootDir | std::path::Component::Prefix(_) => return Err("Security Error: Absolute paths are forbidden.".to_string()),
+                        _ => {}
+                    }
+                }
+                let cwd = std::env::current_dir().map_err(|e| format!("Cannot read cwd: {}", e))?;
+                let resolved = cwd.join(path);
+                if !resolved.starts_with(&cwd) {
+                    return Err("Security Error: Path escapes the bounds.".to_string());
+                }
+                Ok(resolved)
+            }
+
+            match sub_cmd {
+                "list" => { // data.dir.list(path) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::read_dir(&safe_path) {
+                        Ok(entries) => {
+                            let mut list = Vec::new();
+                            for entry in entries {
+                                if let Ok(e) = entry {
+                                    // Make path relative to cwd for safety in Kinetix space
+                                    if let Ok(cwd) = std::env::current_dir() {
+                                        if let Ok(stripped) = e.path().strip_prefix(&cwd) {
+                                            list.push(Value::Str(stripped.to_string_lossy().to_string().replace("\\", "/")));
+                                        } else {
+                                            list.push(Value::Str(e.path().to_string_lossy().to_string().replace("\\", "/")));
+                                        }
+                                    } else {
+                                        list.push(Value::Str(e.path().to_string_lossy().to_string().replace("\\", "/")));
+                                    }
+                                }
+                            }
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Array(list));
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "create" => { // data.dir.create(path) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::create_dir_all(&safe_path) {
+                         Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "delete" => { // data.dir.delete(path) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::remove_dir_all(&safe_path) {
+                         Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                _ => Err(format!("Unknown data.dir function: {}", sub_cmd))
+            }
+        },
+
+        // --- Path Safety & utilities (data.path.*) ---
+        s if s.starts_with("path.") => {
+             let sub_cmd = s.strip_prefix("path.").unwrap();
+             match sub_cmd {
+                  "normalize" => {
+                      let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                      // Basic normalization: replace Windows slash with UNIX slash, remove ending slashes
+                      let normalized = path_str.replace("\\", "/");
+                      let trimmed = normalized.trim_end_matches('/');
+                      Ok(Value::Str(trimmed.to_string()))
+                  },
+                  "isSafe" => {
+                      let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                      let path = Path::new(path_str);
+                      let mut safe = true;
+                      for component in path.components() {
+                          match component {
+                              std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                                  safe = false; break;
+                              },
+                              _ => {}
+                          }
+                      }
+                      if safe {
+                           if let Ok(cwd) = std::env::current_dir() {
+                               let resolved = cwd.join(path);
+                               if !resolved.starts_with(&cwd) { safe = false; }
+                           } else { safe = false; }
+                      }
+                      Ok(Value::Bool(safe))
+                  },
+                  _ => Err(format!("Unknown data.path function: {}", sub_cmd))
+             }
+        },
+
+        // --- FileSystem Watcher Stub ---
+        "watch" => {
+             // data.watch(path) stub implementation returning a fake array or unsupported struct currently
+             let _path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+             let mut res = std::collections::HashMap::new();
+             res.insert("err".to_string(), Value::Str("Feature data.watch is pending event-loop integration. Use normal periodic polling.".to_string()));
+             Ok(Value::Map(res))
+        },
+
         // --- Legacy fallback ---
         "read_bytes" => {
             let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
@@ -139,16 +274,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             let arr = bytes.into_iter().map(|b| Value::Int(b as i64)).collect();
             Ok(Value::Array(arr))
         },
-        "list_dir" => {
-            let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
-            let entries = fs::read_dir(path).map_err(|e| e.to_string())?;
-            let mut list = Vec::new();
-            for entry in entries {
-                let entry = entry.map_err(|e| e.to_string())?;
-                list.push(Value::Str(entry.path().to_string_lossy().to_string()));
-            }
-            Ok(Value::Array(list))
-        },
+
         "alloc" => {
              let size = args.first().and_then(|v| v.as_int().ok()).ok_or("Expected size int")?;
              let arr = vec![Value::Int(0); size as usize];

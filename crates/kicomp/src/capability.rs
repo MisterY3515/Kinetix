@@ -162,8 +162,11 @@ impl CapabilityValidator {
             // Data IO (New file sub-namespace)
             ("data", "file.read" | "file.exists" | "file.copy") => Some(Capability::FsRead),
             ("data", "file.write" | "file.delete" | "file.move") => Some(Capability::FsWrite),
+            // Directory & Path IO (Build 32)
+            ("data", "dir.list" | "path.normalize" | "path.isSafe" | "watch") => Some(Capability::FsRead), // Normalize doesn't touch disk but treating as path inspect
+            ("data", "dir.create" | "dir.delete") => Some(Capability::FsWrite),
             // Data IO (Legacy)
-            ("data", "read_text" | "read_bytes" | "exists" | "list_dir" | "copy") => Some(Capability::FsRead),
+            ("data", "read_text" | "read_bytes" | "exists" | "copy") => Some(Capability::FsRead),
             ("data", "write_text") => Some(Capability::FsWrite),
             // OS / System
             ("system" | "os", "cpu_usage" | "memory_free" | "memory_total" | "os_name" | "os_version" | "hostname" | "user_name" | "uptime") => Some(Capability::SysInfo),
@@ -230,11 +233,17 @@ pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
         ("data.file.delete", Capability::FsWrite),
         ("data.file.copy", Capability::FsRead),
         ("data.file.move", Capability::FsWrite),
+        // Directories (Build 32)
+        ("data.dir.list", Capability::FsRead),
+        ("data.dir.create", Capability::FsWrite),
+        ("data.dir.delete", Capability::FsWrite),
+        ("data.path.normalize", Capability::FsRead),
+        ("data.path.isSafe", Capability::FsRead),
+        ("data.watch", Capability::FsRead),
         // Filesystem (Legacy)
         ("data.read_text", Capability::FsRead),
         ("data.read_bytes", Capability::FsRead),
         ("data.exists", Capability::FsRead),
-        ("data.list_dir", Capability::FsRead),
         ("data.copy", Capability::FsRead),
         ("data.write_text", Capability::FsWrite),
         ("db.connect", Capability::FsRead),
