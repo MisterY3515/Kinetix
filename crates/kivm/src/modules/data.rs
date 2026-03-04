@@ -4,29 +4,140 @@ use std::path::Path;
 
 pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
     match name {
-        // --- File IO ---
-        "read_text" => {
-            let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
-            let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-            Ok(Value::Str(content))
+        // --- File IO (data.file.*) & Path Traversal Security ---
+        s if s.starts_with("file.") => {
+            let sub_cmd = s.strip_prefix("file.").unwrap();
+            
+            // Helper for Path Sandbox validation
+            fn sanitize_path(input_path: &str) -> Result<std::path::PathBuf, String> {
+                let path = Path::new(input_path);
+                
+                // Block explicit traversal attempts
+                for component in path.components() {
+                    match component {
+                        std::path::Component::ParentDir => return Err("Security Error: Path traversal ('..') is strictly forbidden.".to_string()),
+                        std::path::Component::RootDir | std::path::Component::Prefix(_) => return Err("Security Error: Absolute paths are forbidden. Use paths relative to the working directory.".to_string()),
+                        _ => {}
+                    }
+                }
+                
+                // Allow only sanitized relative paths
+                let cwd = std::env::current_dir().map_err(|e| format!("Cannot read cwd: {}", e))?;
+                let resolved = cwd.join(path);
+                
+                // Final safety check: ensuring the resolved path starts with the CWD
+                if !resolved.starts_with(&cwd) {
+                    return Err("Security Error: Path escapes the current working directory boundary.".to_string());
+                }
+                
+                Ok(resolved)
+            }
+
+            match sub_cmd {
+                "read" => { // data.file.read(path) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::read_to_string(&safe_path) {
+                        Ok(content) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Str(content));
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "write" => { // data.file.write(path, content) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let content = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected content string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::write(&safe_path, content) {
+                        Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "exists" => { // data.file.exists(path) -> bool
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    // Even `exists` gets sanitized so we don't leak information about outside files
+                    match sanitize_path(path_str) {
+                        Ok(safe_path) => Ok(Value::Bool(safe_path.exists())),
+                        Err(_) => Ok(Value::Bool(false)) // Treat invalid paths as non-existent securely
+                    }
+                },
+                "delete" => { // data.file.delete(path) -> Result<Map>
+                    let path_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
+                    let safe_path = sanitize_path(path_str)?;
+                    match fs::remove_file(&safe_path) {
+                        Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "copy" => { // data.file.copy(from, to) -> Result<Map>
+                    let src_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected src path string")?;
+                    let dst_str = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected dst path string")?;
+                    let safe_src = sanitize_path(src_str)?;
+                    let safe_dst = sanitize_path(dst_str)?;
+                    match fs::copy(&safe_src, &safe_dst) {
+                        Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                "move" => { // data.file.move(from, to) -> Result<Map>
+                    let src_str = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected src path string")?;
+                    let dst_str = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected dst path string")?;
+                    let safe_src = sanitize_path(src_str)?;
+                    let safe_dst = sanitize_path(dst_str)?;
+                    match fs::rename(&safe_src, &safe_dst) {
+                        Ok(_) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("ok".to_string(), Value::Null);
+                            Ok(Value::Map(res))
+                        },
+                        Err(e) => {
+                            let mut res = std::collections::HashMap::new();
+                            res.insert("err".to_string(), Value::Str(e.to_string()));
+                            Ok(Value::Map(res))
+                        }
+                    }
+                },
+                _ => Err(format!("Unknown data.file function: {}", sub_cmd))
+            }
         },
-        "write_text" => {
-            let path = args.get(0).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
-            let default_content = String::new();
-            let content = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).unwrap_or(&default_content);
-            fs::write(path, content).map_err(|e| e.to_string())?;
-            Ok(Value::Null)
-        },
+
+
+        // --- Legacy fallback ---
         "read_bytes" => {
             let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
             let bytes = fs::read(path).map_err(|e| e.to_string())?;
-            // Convert to Array of Ints (slow but compatible)
             let arr = bytes.into_iter().map(|b| Value::Int(b as i64)).collect();
             Ok(Value::Array(arr))
-        },
-        "exists" => {
-             let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
-             Ok(Value::Bool(Path::new(path).exists()))
         },
         "list_dir" => {
             let path = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected path string")?;
@@ -39,16 +150,9 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
             Ok(Value::Array(list))
         },
         "alloc" => {
-             // Just creates an array of zeros
              let size = args.first().and_then(|v| v.as_int().ok()).ok_or("Expected size int")?;
              let arr = vec![Value::Int(0); size as usize];
              Ok(Value::Array(arr))
-        },
-        "copy" => {
-             let src = args.first().and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected src path")?;
-             let dst = args.get(1).and_then(|v| match v { Value::Str(s) => Some(s), _ => None }).ok_or("Expected dst path")?;
-             fs::copy(src, dst).map_err(|e| e.to_string())?;
-             Ok(Value::Null)
         },
 
         // --- JSON ---
@@ -90,6 +194,7 @@ pub fn call(name: &str, args: &[Value]) -> Result<Value, String> {
              wtr.flush().map_err(|e| e.to_string())?;
              Ok(Value::Null)
         },
+
 
         _ => Err(format!("Unknown data function: {}", name))
     }

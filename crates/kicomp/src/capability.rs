@@ -159,7 +159,10 @@ impl CapabilityValidator {
 
     fn check_builtin_capability(&self, module: &str, method: &str, line: usize, errors: &mut Vec<CapabilityError>) {
         let req = match (module, method) {
-            // Data IO
+            // Data IO (New file sub-namespace)
+            ("data", "file.read" | "file.exists" | "file.copy") => Some(Capability::FsRead),
+            ("data", "file.write" | "file.delete" | "file.move") => Some(Capability::FsWrite),
+            // Data IO (Legacy)
             ("data", "read_text" | "read_bytes" | "exists" | "list_dir" | "copy") => Some(Capability::FsRead),
             ("data", "write_text") => Some(Capability::FsWrite),
             // OS / System
@@ -220,7 +223,14 @@ impl CapabilityValidator {
 /// Used for documentation, tooling and audit trail generation.
 pub fn static_syscall_map() -> Vec<(&'static str, Capability)> {
     vec![
-        // Filesystem
+        // Filesystem (Build 31)
+        ("data.file.read", Capability::FsRead),
+        ("data.file.write", Capability::FsWrite),
+        ("data.file.exists", Capability::FsRead),
+        ("data.file.delete", Capability::FsWrite),
+        ("data.file.copy", Capability::FsRead),
+        ("data.file.move", Capability::FsWrite),
+        // Filesystem (Legacy)
         ("data.read_text", Capability::FsRead),
         ("data.read_bytes", Capability::FsRead),
         ("data.exists", Capability::FsRead),
