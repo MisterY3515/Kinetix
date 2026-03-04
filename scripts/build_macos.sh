@@ -2,7 +2,7 @@
 # Build script for macOS (.pkg Installer)
 set -e
 
-export KINETIX_BUILD="28"
+export KINETIX_BUILD="30"
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."

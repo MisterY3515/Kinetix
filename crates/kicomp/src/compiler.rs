@@ -5,7 +5,7 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 28;
+pub const CURRENT_BUILD: i64 = 30;
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
