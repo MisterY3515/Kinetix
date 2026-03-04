@@ -319,6 +319,11 @@ fn run() -> Result<(), String> {
         }
         Commands::Exec { file, audit } => {
             let source = fs::read_to_string(&file).map_err(|e| format!("Error reading {}: {}", file.display(), e))?;
+            
+            if source.trim_start().starts_with("{\\rtf") {
+                return Err(format!("'{}' appears to be a Rich Text Format (RTF) document, not a plain text source file. Please save it as plain text using a proper code editor (like VS Code or TextEdit in Plain Text mode).", file.display()));
+            }
+
             use kinetix_kicomp::compiler::Compiler;
 
             let lexer = kinetix_language::lexer::Lexer::new(&source);
@@ -445,6 +450,10 @@ fn run() -> Result<(), String> {
         }
         Commands::Compile { input, output, exe, native } => {
             let source = fs::read_to_string(&input).map_err(|e| format!("Error reading {}: {}", input.display(), e))?;
+            
+            if source.trim_start().starts_with("{\\rtf") {
+                return Err(format!("'{}' appears to be a Rich Text Format (RTF) document, not a plain text source file. Please save it as plain text using a proper code editor.", input.display()));
+            }
             
             // Preprocess includes
             let source = preprocess_includes(&source, input.parent().unwrap_or(Path::new(".")))
@@ -690,6 +699,10 @@ fn run_tests_recursive(path: &Path, passed: &mut usize, failed: &mut usize) -> R
 
 fn run_test_file(path: &Path) -> Result<(), String> {
     let source = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    
+    if source.trim_start().starts_with("{\\rtf") {
+        return Err(format!("'{}' appears to be a Rich Text Format (RTF) document, not a plain text source file. Please save it as plain text.", path.display()));
+    }
     
     // Preprocess includes
     let source = preprocess_includes(&source, path.parent().unwrap_or(Path::new(".")))?;
@@ -948,14 +961,19 @@ fn open_docs() -> Result<(), String> {
 fn open_installer(arg: &str) -> Result<(), String> {
     let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
     
-    // The installer is usually parallel to `kivm.exe` in `target/debug` or `dist/`
+    #[cfg(target_os = "windows")]
+    let installer_name = "installer.exe";
+    #[cfg(not(target_os = "windows"))]
+    let installer_name = "KinetixInstaller";
+
+    // The installer is usually parallel to `kivm` in `target/debug`, `dist/`, or system PATH
     let mut installer_path = exe_path.parent()
-        .map(|p| p.join("installer.exe"))
-        .unwrap_or_else(|| PathBuf::from("installer.exe"));
+        .map(|p| p.join(installer_name))
+        .unwrap_or_else(|| PathBuf::from(installer_name));
 
     if !installer_path.exists() {
-        // Fallback for development (e.g., if we're in `target/debug` but we want `installer.exe`)
-        installer_path = PathBuf::from("installer.exe");
+        // Fallback for development (e.g., if we're in `target/debug` but we want the installer)
+        installer_path = PathBuf::from(installer_name);
     }
 
     std::process::Command::new(&installer_path)
