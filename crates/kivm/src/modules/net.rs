@@ -424,6 +424,142 @@ pub fn call(func_name: &str, args: &[Value]) -> Result<Value, String> {
             }
         }
 
+        // net.ping(address, timeout_ms) -> Result<u32, E>
+        // Uses TCP connect probe (port 80) as ICMP requires root/admin privileges.
+        // Returns round-trip time in milliseconds.
+        "ping" => {
+            let addr = match args.get(0) {
+                Some(Value::Str(s)) => s.clone(),
+                _ => return Ok(err_result("Expected address string")),
+            };
+            let timeout_ms = match args.get(1) {
+                Some(Value::Int(n)) => *n as u64,
+                _ => 1000, // default 1 second
+            };
+
+            // Resolve hostname first if not an IP
+            use std::net::ToSocketAddrs;
+            let target = format!("{}:80", addr);
+            let resolved = match target.to_socket_addrs() {
+                Ok(mut addrs) => match addrs.next() {
+                    Some(a) => a,
+                    None => return Ok(err_result("Could not resolve address")),
+                },
+                Err(e) => return Ok(err_result(&format!("DNS resolution failed: {}", e))),
+            };
+
+            let start = std::time::Instant::now();
+            match TcpStream::connect_timeout(&resolved, Duration::from_millis(timeout_ms)) {
+                Ok(stream) => {
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    let _ = stream.shutdown(Shutdown::Both);
+                    Ok(ok_result(Value::Int(elapsed)))
+                }
+                Err(e) => Ok(err_result(&format!("Ping failed: {}", e))),
+            }
+        }
+
+        // net.getInterfaces() -> List of Maps {name, addr}
+        // Enumerates local network interfaces via OS commands.
+        "getInterfaces" => {
+            let mut interfaces: Vec<Value> = Vec::new();
+
+            #[cfg(target_os = "windows")]
+            {
+                // Use ipconfig on Windows
+                if let Ok(output) = std::process::Command::new("ipconfig").output() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let mut current_name = String::new();
+                    for line in text.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with(' ') && line.ends_with(':') {
+                            current_name = trimmed.trim_end_matches(':').to_string();
+                        }
+                        if let Some(ip_part) = trimmed.strip_prefix("IPv4 Address") {
+                            if let Some(ip) = ip_part.split(':').last() {
+                                let ip = ip.trim();
+                                let mut m = HashMap::new();
+                                m.insert("name".to_string(), Value::Str(current_name.clone()));
+                                m.insert("addr".to_string(), Value::Str(ip.to_string()));
+                                interfaces.push(Value::Map(m));
+                            }
+                        }
+                        // Also catch "Indirizzo IPv4" for Italian locale
+                        if let Some(ip_part) = trimmed.strip_prefix("Indirizzo IPv4") {
+                            if let Some(ip) = ip_part.split(':').last() {
+                                let ip = ip.trim();
+                                let mut m = HashMap::new();
+                                m.insert("name".to_string(), Value::Str(current_name.clone()));
+                                m.insert("addr".to_string(), Value::Str(ip.to_string()));
+                                interfaces.push(Value::Map(m));
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(output) = std::process::Command::new("ip").args(&["-o", "-4", "addr", "show"]).output() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 4 {
+                            let name = parts[1].to_string();
+                            let addr_cidr = parts[3];
+                            let addr = addr_cidr.split('/').next().unwrap_or("").to_string();
+                            let mut m = HashMap::new();
+                            m.insert("name".to_string(), Value::Str(name));
+                            m.insert("addr".to_string(), Value::Str(addr));
+                            interfaces.push(Value::Map(m));
+                        }
+                    }
+                }
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(output) = std::process::Command::new("ifconfig").output() {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let mut current_name = String::new();
+                    for line in text.lines() {
+                        // Interface header lines don't start with whitespace
+                        if !line.starts_with('\t') && !line.starts_with(' ') && line.contains(':') {
+                            current_name = line.split(':').next().unwrap_or("").to_string();
+                        }
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("inet ") && !trimmed.starts_with("inet6") {
+                            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                            if parts.len() >= 2 {
+                                let mut m = HashMap::new();
+                                m.insert("name".to_string(), Value::Str(current_name.clone()));
+                                m.insert("addr".to_string(), Value::Str(parts[1].to_string()));
+                                interfaces.push(Value::Map(m));
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(Value::Array(interfaces))
+        }
+
+        // net.tls.connect(addr, port) -> Result<Connection, E>
+        // Placeholder for Build 30 — TLS support will be expanded in later builds
+        "tls.connect" => {
+            let addr = match args.get(0) {
+                Some(Value::Str(s)) => s.clone(),
+                _ => return Ok(err_result("Expected address string")),
+            };
+            let port = match args.get(1) {
+                Some(Value::Int(p)) => *p as u16,
+                _ => 443,
+            };
+            // For now, use ureq's TLS internally via a simple HTTPS GET probe
+            // Full TLS socket support planned for future builds
+            Ok(err_result(&format!("TLS socket support for {}:{} is planned for a future build. Use net.http.get with https:// URLs for TLS connections.", addr, port)))
+        }
+
         _ => Err(format!("Unknown net function: {}", func_name)),
     }
 }

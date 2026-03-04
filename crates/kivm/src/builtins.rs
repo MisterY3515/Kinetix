@@ -46,6 +46,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "net.tcp.localAddr", "net.tcp.peerAddr",
     "net.udp.bind", "net.udp.send", "net.udp.recv", "net.udp.setTimeout", "net.udp.close",
     "net.http.get", "net.http.post", "net.http.download", "net.resolve",
+    // Net Utils (Build 30)
+    "net.ping", "net.getInterfaces", "net.tls.connect",
 ];
 
 use crate::vm::VM;
