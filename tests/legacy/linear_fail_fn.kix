@@ -1,0 +1,6 @@
+fn main() {
+    let a = "resource";
+    let b = a; // Moved
+    println(a); // Error
+}
+main();

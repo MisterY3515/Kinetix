@@ -25,3 +25,5 @@ pub mod ir_hash;
 pub mod capability;
 pub mod hir_validate;
 pub mod vtable;
+pub mod project;
+pub mod resolver;

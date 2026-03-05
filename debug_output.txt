@@ -1,0 +1,36 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+     Running `target\debug\kivm.exe exec tests\test_fs.kix`
+
+[1;37mtests\test_fs.kix:[0m
+[1;31merror[0m: Use of uninitialized or moved variable 'test_file'
+  [1;34m--> tests\test_fs.kix:0[0m
+   [1;34m|[0m
+[1;34m 0 |[0m fn main() {
+   [1;34m|[0m [1;31m^^^^^^^^^^^[0m
+[1;31merror[0m: Use of uninitialized or moved variable 'test_file'
+  [1;34m--> tests\test_fs.kix:0[0m
+   [1;34m|[0m
+[1;34m 0 |[0m fn main() {
+   [1;34m|[0m [1;31m^^^^^^^^^^^[0m
+[1;31merror[0m: Use of uninitialized or moved variable 'test_file'
+  [1;34m--> tests\test_fs.kix:0[0m
+   [1;34m|[0m
+[1;34m 0 |[0m fn main() {
+   [1;34m|[0m [1;31m^^^^^^^^^^^[0m
+[1;31merror[0m: Use of uninitialized or moved variable 'test_dir'
+  [1;34m--> tests\test_fs.kix:0[0m
+   [1;34m|[0m
+[1;34m 0 |[0m fn main() {
+   [1;34m|[0m [1;31m^^^^^^^^^^^[0m
+[1;31merror[0m: Use of uninitialized or moved variable 'test_dir'
+  [1;34m--> tests\test_fs.kix:0[0m
+   [1;34m|[0m
+[1;34m 0 |[0m fn main() {
+   [1;34m|[0m [1;31m^^^^^^^^^^^[0m
+  5 error(s) in Borrow Checker
+
+[1;31merror[E0000][0m: aborting due to previous error(s)
+[2m  Kinetix v0.0.9 (Dev)[0m
+[36m  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues[0m
+
+error: process didn't exit successfully: `target\debug\kivm.exe exec tests\test_fs.kix` (exit code: 1)
