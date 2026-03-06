@@ -54,6 +54,24 @@ enum Commands {
         #[arg(long)]
         native: bool,
     },
+    /// Initialize a new Kinetix project with scaffolding
+    Init {
+        /// Project name (defaults to current directory name)
+        #[arg(default_value = ".")]
+        name: String,
+    },
+    /// Build a project from a .kicomp configuration file
+    Build {
+        /// Path to .kicomp file (default: project.kicomp in cwd)
+        #[arg(default_value = "project.kicomp")]
+        config: PathBuf,
+    },
+    /// Build and run a project from a .kicomp configuration file
+    Start {
+        /// Path to .kicomp file (default: project.kicomp in cwd)
+        #[arg(default_value = "project.kicomp")]
+        config: PathBuf,
+    },
     /// Show version information
     Version,
     /// Run unit tests in a directory or file
@@ -628,6 +646,46 @@ fn run() -> Result<(), String> {
                 println!("Compiled successfully: {} -> {}", input.display(), output_path.display());
             }
         }
+        Commands::Init { name } => {
+            let project_name = if name == "." {
+                std::env::current_dir()
+                    .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "my_project".to_string())
+            } else {
+                name.clone()
+            };
+
+            // Create directory structure
+            let base = if name == "." { PathBuf::from(".") } else { PathBuf::from(&name) };
+            let src_dir = base.join("src");
+            fs::create_dir_all(&src_dir).map_err(|e| format!("Cannot create directory: {}", e))?;
+
+            // Write project.kicomp
+            let kicomp_path = base.join("project.kicomp");
+            if kicomp_path.exists() {
+                return Err(format!("project.kicomp already exists in '{}'", base.display()));
+            }
+            fs::write(&kicomp_path, kinetix_kicomp::project::scaffold_kicomp(&project_name))
+                .map_err(|e| format!("Cannot write project.kicomp: {}", e))?;
+
+            // Write src/main.kix
+            let main_path = src_dir.join("main.kix");
+            if !main_path.exists() {
+                fs::write(&main_path, kinetix_kicomp::project::scaffold_main_kix(&project_name))
+                    .map_err(|e| format!("Cannot write src/main.kix: {}", e))?;
+            }
+
+            println!("✓ Kinetix project '{}' initialized.", project_name);
+            println!("  {}", kicomp_path.display());
+            println!("  {}", main_path.display());
+            println!("\nRun with: kivm start");
+        }
+        Commands::Build { config } => {
+            run_project(config, false)?;
+        }
+        Commands::Start { config } => {
+            run_project(config, true)?;
+        }
         Commands::Version => {
             println!("  Kinetix v{} ({})", env!("CARGO_PKG_VERSION"), kinetix_kicomp::compiler::CURRENT_BUILD);
         }
@@ -660,6 +718,121 @@ fn run() -> Result<(), String> {
                  std::process::exit(1);
              }
         }
+    }
+
+    Ok(())
+}
+
+/// Build 33: Compile and optionally run a project from a .kicomp configuration file.
+fn run_project(config: PathBuf, should_run: bool) -> Result<(), String> {
+    use kinetix_kicomp::compiler::Compiler;
+
+    // Parse .kicomp project file
+    let project = kinetix_kicomp::project::parse_kicomp(&config)
+        .map_err(|e| format!("{}", e))?;
+
+    println!("Building '{}' v{} ...", project.name, project.version);
+
+    // Resolve dependencies
+    let modules = kinetix_kicomp::resolver::resolve_dependencies(&project)
+        .map_err(|e| format!("{}", e))?;
+
+    // Combine all module sources into a single compilation unit
+    let source = kinetix_kicomp::resolver::combine_sources(&modules);
+
+    // Full compilation pipeline
+    let lexer = kinetix_language::lexer::Lexer::new(&source);
+    let arena = Bump::new();
+    let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
+    let ast = parser.parse_program();
+
+    if !parser.errors.is_empty() {
+        let errs: Vec<String> = parser.errors.iter().map(|e| e.to_string()).collect();
+        return Err(format_pipeline_error(&config, "Parser", errs));
+    }
+
+    let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements)
+        .map_err(|errs| format_pipeline_error(&config, "Symbol Resolution", errs))?;
+
+    let mut traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+    for stmt in &ast.statements {
+        if let kinetix_language::ast::Statement::Trait { .. } = stmt {
+            if let Err(e) = traits.register_trait(stmt) {
+                return Err(format_pipeline_error(&config, "Trait Resolver", vec![e]));
+            }
+        }
+    }
+    for stmt in &ast.statements {
+        if let kinetix_language::ast::Statement::Impl { .. } = stmt {
+            if let Err(e) = traits.register_impl(stmt) {
+                return Err(format_pipeline_error(&config, "Trait Resolver", vec![e]));
+            }
+        }
+    }
+    traits.validate_cycles().map_err(|e| format_pipeline_error(&config, "Trait Resolver", vec![e]))?;
+
+    let mut hir = kinetix_kicomp::hir::lower_to_hir(&ast.statements, &symbols, &traits);
+    kinetix_kicomp::type_normalize::normalize(&mut hir, &symbols)
+        .map_err(|e| format_pipeline_error(&config, "Type Normalizer", vec![e]))?;
+    let mut ctx = kinetix_kicomp::typeck::TypeContext::new();
+    let constraints = ctx.collect_constraints(&hir);
+    ctx.solve(&constraints).map_err(|errs| {
+        let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+        format_pipeline_error(&config, "Type Checker", msgs)
+    })?;
+
+    kinetix_kicomp::type_normalize::resolve_method_calls(&mut hir, &symbols, &ctx.substitution)
+        .map_err(|e| format_pipeline_error(&config, "Method Resolution", vec![e]))?;
+
+    kinetix_kicomp::exhaustiveness::check_program_exhaustiveness(&hir, &symbols, &ctx.substitution)
+        .map_err(|e| format_pipeline_error(&config, "Exhaustiveness Checker", vec![e]))?;
+
+    // Build 33: Capabilities derived from .kicomp sandbox section
+    let granted_caps = project.sandbox.to_capabilities();
+    let cap_validator = kinetix_kicomp::capability::CapabilityValidator::new(granted_caps);
+    cap_validator.validate(&hir).map_err(|errs| {
+        let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+        format_pipeline_error(&config, "Sandbox Audit Pass", msgs)
+    })?;
+
+    kinetix_kicomp::hir_validate::validate(&hir).map_err(|errs| {
+        format_pipeline_error(&config, "HIR Integrity", errs)
+    })?;
+
+    let mir = kinetix_kicomp::mir::lower_to_mir(&hir, &ctx.substitution);
+    kinetix_kicomp::borrowck::check_mir(&mir).map_err(|errs| {
+        format_pipeline_error(&config, "Borrow Checker", errs)
+    })?;
+
+    let mir = kinetix_kicomp::monomorphize::monomorphize(&mir).map_err(|e| {
+        format_pipeline_error(&config, "Monomorphization Pass", vec![e])
+    })?;
+
+    kinetix_kicomp::mono_validate::validate(&mir).map_err(|e| {
+        format_pipeline_error(&config, "Post-Mono Validator", vec![e])
+    })?;
+
+    kinetix_kicomp::drop_verify::verify(&mir).map_err(|e| {
+        format_pipeline_error(&config, "Drop Order Verifier", vec![e])
+    })?;
+
+    kinetix_kicomp::ssa_validate::validate(&mir).map_err(|e| {
+        format_pipeline_error(&config, "MIR Integrity", vec![e])
+    })?;
+
+    let reactive_graph = kinetix_kicomp::reactive::build_reactive_graph(&hir)
+        .map_err(|e| format!("Reactive Graph Error: {}", e))?;
+
+    let mut compiler = Compiler::new();
+    let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled()))
+        .map_err(|e| format!("Compilation error: {}", e))?;
+
+    println!("✓ Build successful: '{}' v{}", project.name, project.version);
+
+    if should_run {
+        println!("--- Running ---");
+        let mut vm = VM::new(compiled.clone());
+        vm.run().map_err(|e| format!("Runtime error: {}", e))?;
     }
 
     Ok(())

@@ -1,0 +1,90 @@
+// Phase 2 Type System Test — Kinetix v0.0.6
+// Verifica: Enum, Trait, Impl, Match, Option<T>, Result<T,E>, Exhaustiveness
+// NOTE: These constructs are parsed and structurally validated through the
+//       HIR → Type Check → MIR → Borrow Check → Monomorphize → Validate pipeline.
+//       VM bytecode emission for enum/match/trait is Phase 3+ (Build 15+).
+
+// ──────────────────── 1. Enum Declarations ────────────────────
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+enum Result<T> {
+    Ok(T),
+    Err(str),
+}
+
+// ──────────────────── 2. Trait Declarations ────────────────────
+
+trait Display<T> {
+    fn show(self: T) -> str
+}
+
+trait Eq<T> {
+    fn equals(self: T, other: T) -> bool
+}
+
+// ──────────────────── 3. Impl Declarations ────────────────────
+
+impl Display for Color {
+    fn show(self: Color) -> str {
+        return "color"
+    }
+}
+
+// ──────────────────── 4. Match Expression ────────────────────
+
+// Match on integer literal
+let x = 42
+let label = match x {
+    1 => "one",
+    42 => "forty-two",
+    _ => "other",
+}
+
+// ──────────────────── 5. Basic functionality (VM-executable) ────────────────────
+
+// These tests verify Phase 0/1 features still work correctly after Phase 2 changes
+let a = 10
+let b = 20
+let sum = a + b
+
+if sum == 30 {
+    println("Phase 2 basic arithmetic: OK")
+}
+
+// String operations
+let greeting = "Kinetix v0.0.6"
+println(greeting)
+
+// Arrays still work
+let nums = [1, 2, 3]
+
+// Functions still work
+fn add(x: int, y: int) -> int {
+    return x + y
+}
+
+let result = add(5, 7)
+if result == 12 {
+    println("Phase 2 functions: OK")
+}
+
+// While loop
+mut counter = 0
+while counter < 3 {
+    counter = counter + 1
+}
+if counter == 3 {
+    println("Phase 2 loops: OK")
+}
+
+println("Phase 2 Type System Test Complete")
