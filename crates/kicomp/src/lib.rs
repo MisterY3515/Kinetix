@@ -27,3 +27,4 @@ pub mod hir_validate;
 pub mod vtable;
 pub mod project;
 pub mod resolver;
+pub mod lsp;

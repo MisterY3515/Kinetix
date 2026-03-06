@@ -1,0 +1,44 @@
+    Checking kinetix-kicomp v0.0.9 (D:\Progetti\Nevhar\Kinetix\crates\kicomp)
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `kinetix_kicomp`
+   --> crates\kicomp\src\lsp.rs:142:23
+    |
+142 |         let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements);
+    |                       ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `kinetix_kicomp`
+    |
+    = help: if you wanted to use a crate named `kinetix_kicomp`, use `cargo add kinetix_kicomp` to add it to your `Cargo.toml`
+help: consider importing this module
+    |
+  4 + use crate::symbol;
+    |
+help: if you import `symbol`, refer to it directly
+    |
+142 -         let symbols = kinetix_kicomp::symbol::resolve_program(&ast.statements);
+142 +         let symbols = symbol::resolve_program(&ast.statements);
+    |
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `kinetix_kicomp`
+   --> crates\kicomp\src\lsp.rs:145:30
+    |
+145 |                 let traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+    |                              ^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `kinetix_kicomp`
+    |
+    = help: if you wanted to use a crate named `kinetix_kicomp`, use `cargo add kinetix_kicomp` to add it to your `Cargo.toml`
+help: consider importing this struct
+    |
+  4 + use crate::trait_solver::TraitEnvironment;
+    |
+help: if you import `TraitEnvironment`, refer to it directly
+    |
+145 -                 let traits = kinetix_kicomp::trait_solver::TraitEnvironment::new();
+145 +                 let traits = TraitEnvironment::new();
+    |
+
+error[E0282]: type annotations needed
+   --> crates\kicomp\src\lsp.rs:155:31
+    |
+155 |                     let msg = err.to_string();
+    |                               ^^^ cannot infer type
+
+Some errors have detailed explanations: E0282, E0433.
+For more information about an error, try `rustc --explain E0282`.
+error: could not compile `kinetix-kicomp` (lib) due to 3 previous errors
