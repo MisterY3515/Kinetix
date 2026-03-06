@@ -72,6 +72,8 @@ enum Commands {
         #[arg(default_value = "project.kicomp")]
         config: PathBuf,
     },
+    /// Start the Language Server Protocol for IDE integration
+    Lsp,
     /// Show version information
     Version,
     /// Run unit tests in a directory or file
@@ -685,6 +687,9 @@ fn run() -> Result<(), String> {
         }
         Commands::Start { config } => {
             run_project(config, true)?;
+        }
+        Commands::Lsp => {
+            kinetix_kicomp::lsp::start_server()?;
         }
         Commands::Version => {
             println!("  Kinetix v{} ({})", env!("CARGO_PKG_VERSION"), kinetix_kicomp::compiler::CURRENT_BUILD);

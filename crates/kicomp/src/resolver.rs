@@ -3,8 +3,8 @@
 /// Resolves local path dependencies declared in `.kicomp` files.
 /// Builds a topological ordering (DAG) of modules for compilation.
 
-use std::path::{Path, PathBuf};
-use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::collections::HashSet;
 use crate::project::{ProjectConfig, Dependency, DependencySource};
 
 // ─── Data Structures ─────────────────────────────────────────────────────
