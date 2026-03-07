@@ -38,6 +38,12 @@ enum Commands {
         /// Audit allocations and formal invariants
         #[arg(long)]
         audit: bool,
+        /// Print compiler optimization metrics
+        #[arg(long)]
+        metrics: bool,
+        /// Disable compiler optimizations
+        #[arg(long)]
+        no_opt: bool,
     },
     /// Compile a .kix source file to .exki bytecode
     Compile {
@@ -53,6 +59,12 @@ enum Commands {
         /// Compile to native machine code (LLVM)
         #[arg(long)]
         native: bool,
+        /// Print compiler optimization metrics
+        #[arg(long)]
+        metrics: bool,
+        /// Disable compiler optimizations
+        #[arg(long)]
+        no_opt: bool,
     },
     /// Initialize a new Kinetix project with scaffolding
     Init {
@@ -337,7 +349,7 @@ fn run() -> Result<(), String> {
                 println!("Total Heap Allocations: {}", vm.mem_stats.total_heap_allocations);
             }
         }
-        Commands::Exec { file, audit } => {
+        Commands::Exec { file, audit, metrics, no_opt } => {
             let source = fs::read_to_string(&file).map_err(|e| format!("Error reading {}: {}", file.display(), e))?;
             
             if source.trim_start().starts_with("{\\rtf") {
@@ -455,12 +467,36 @@ fn run() -> Result<(), String> {
                 
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled())).map_err(|e| format!("Compilation error: {}", e))?;
+
+            // Build 35: Bytecode Optimization Passes
+            let mut optimized = compiled.clone();
             
+            let mut met = kinetix_kicomp::metrics::CompilerMetrics::new();
+            if metrics {
+                met.total_instructions_before = kinetix_kicomp::metrics::CompilerMetrics::count_instructions(&optimized);
+            }
+            
+            if !no_opt {
+                let (_, ms) = kinetix_kicomp::metrics::timed(|| {
+                    kinetix_kicomp::opt::optimize(&mut optimized);
+                });
+                if metrics {
+                    met.total_instructions_after = kinetix_kicomp::metrics::CompilerMetrics::count_instructions(&optimized);
+                    met.record_phase("All Bytecode Passes", met.total_instructions_before, met.total_instructions_after, ms);
+                }
+            } else if metrics {
+                met.total_instructions_after = met.total_instructions_before;
+            }
+            
+            if metrics {
+                met.print_report();
+            }
+
             if audit {
                 println!("[✓] Formal Invariants Certified");
             }
             
-            let mut vm = VM::new(compiled.clone());
+            let mut vm = VM::new(optimized);
             vm.run().map_err(|e| format!("Runtime error: {}", e))?;
             
             if audit {
@@ -468,7 +504,7 @@ fn run() -> Result<(), String> {
                 println!("Total Heap Allocations: {}", vm.mem_stats.total_heap_allocations);
             }
         }
-        Commands::Compile { input, output, exe, native } => {
+        Commands::Compile { input, output, exe, native, metrics, no_opt } => {
             let source = fs::read_to_string(&input).map_err(|e| format!("Error reading {}: {}", input.display(), e))?;
             
             if source.trim_start().starts_with("{\\rtf") {
@@ -574,6 +610,32 @@ fn run() -> Result<(), String> {
             let mut compiler = Compiler::new();
             let compiled = compiler.compile(&ast.statements, Some(reactive_graph.to_compiled()))
                 .map_err(|e| format!("Compilation error: {}", e))?;
+
+            // Build 35: Bytecode Optimization Passes
+            let mut optimized = compiled.clone();
+            
+            let mut met = kinetix_kicomp::metrics::CompilerMetrics::new();
+            if metrics {
+                met.total_instructions_before = kinetix_kicomp::metrics::CompilerMetrics::count_instructions(&optimized);
+            }
+            
+            if !no_opt {
+                let (_, ms) = kinetix_kicomp::metrics::timed(|| {
+                    kinetix_kicomp::opt::optimize(&mut optimized);
+                });
+                if metrics {
+                    met.total_instructions_after = kinetix_kicomp::metrics::CompilerMetrics::count_instructions(&optimized);
+                    met.record_phase("All Bytecode Passes", met.total_instructions_before, met.total_instructions_after, ms);
+                }
+            } else if metrics {
+                met.total_instructions_after = met.total_instructions_before;
+            }
+            
+            if metrics {
+                met.print_report();
+            }
+            
+            let compiled = &optimized;
 
             if native {
                 #[cfg(feature = "llvm")]

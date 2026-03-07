@@ -141,8 +141,8 @@ fn process_document(uri: &str, text: &str, stdout: &mut impl Write) -> Result<()
         // Syntax valid: Proceed to Semantic Analysis & Type Checking (HM)
         let symbols = crate::symbol::resolve_program(&ast.statements);
         match symbols {
-            Ok(sym_table) => {
-                let traits = crate::trait_solver::TraitEnvironment::new();
+            Ok(_sym_table) => {
+                let _traits = crate::trait_solver::TraitEnvironment::new();
                 // Lower to HIR and execute HM type inferencing
                 // Although lower_to_hir panics on extreme type errors currently, we capture safe errors where possible
                 // For a more robust LSP, lower_to_hir would need to return Result<_, Vec<Error>>.

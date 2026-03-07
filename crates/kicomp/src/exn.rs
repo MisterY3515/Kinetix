@@ -16,11 +16,13 @@ pub fn write_exn<W: Write>(writer: &mut W, program: &CompiledProgram) -> io::Res
     // 1. Magic number
     writer.write_all(MAGIC)?;
 
-    // 2. JSON manifest
+    // 2. JSON manifest (Extended Linker)
     let manifest = serde_json::json!({
         "version": program.version,
         "functions": program.functions.len(),
-        "format": "kivm-bytecode-v1",
+        "format": "kivm-bytecode-v2",
+        "optimized": program.is_optimized,
+        "compiler_build": crate::compiler::CURRENT_BUILD,
     });
     let manifest_bytes = serde_json::to_vec(&manifest)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
