@@ -1,0 +1,19 @@
+warning: unused imports: `BasicBlockData` and `MirStatement`
+ --> crates\kicomp\src\mir_opt.rs:4:43
+  |
+4 | ...m, BasicBlockData, TerminatorKind, MirStatement};
+  |       ^^^^^^^^^^^^^^                  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `kinetix-kicomp` (lib) generated 1 warning (run `cargo fix --lib -p kinetix-kicomp` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+     Running `target\debug\kivm.exe exec tests/phase3_oop.kix --metrics`
+
+error: Error reading tests/phase3_oop.kix: Impossibile trovare il file specificato. (os error 2)
+
+error[E0000]: aborting due to previous error(s)
+  Kinetix v0.0.9 (Dev)
+  For more information, open an issue: https://github.com/MisterY3515/Kinetix/issues
+
+error: process didn't exit successfully: `target\debug\kivm.exe exec tests/phase3_oop.kix --metrics` (exit code: 1)

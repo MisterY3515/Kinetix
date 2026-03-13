@@ -257,6 +257,9 @@ pub struct CompiledProgram {
     /// Static VTable: maps (class_name, method_name) → function_index
     #[serde(default)]
     pub vtable: std::collections::HashMap<String, std::collections::HashMap<String, usize>>,
+    /// Build 35: Flag indicating if compiler optimization passes were applied
+    #[serde(default)]
+    pub is_optimized: bool,
 }
 
 impl CompiledProgram {
@@ -267,6 +270,7 @@ impl CompiledProgram {
             version: "0.1.0".to_string(), // will be updated by compiler
             reactive_graph: CompiledReactiveGraph::new(),
             vtable: std::collections::HashMap::new(),
+            is_optimized: false,
         }
     }
 }

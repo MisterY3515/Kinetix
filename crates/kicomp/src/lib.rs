@@ -28,3 +28,6 @@ pub mod vtable;
 pub mod project;
 pub mod resolver;
 pub mod lsp;
+pub mod opt;
+pub mod mir_opt;
+pub mod metrics;

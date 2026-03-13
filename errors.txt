@@ -1,0 +1,66 @@
+    Checking kinetix-kicomp v0.0.9 (D:\Progetti\Nevhar\Kinetix\crates\kicomp)
+warning: unused imports: `BasicBlockData` and `MirStatement`
+ --> crates\kicomp\src\mir_opt.rs:4:43
+  |
+4 | use crate::mir::{MirFunction, MirProgram, BasicBlockData, TerminatorKind, MirStatement};
+  |                                           ^^^^^^^^^^^^^^                  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0609]: no field `main` on type `&mut MirProgram`
+  --> crates\kicomp\src\mir_opt.rs:10:40
+   |
+10 |     optimize_mir_function(&mut program.main);
+   |                                        ^^^^ unknown field
+   |
+   = note: available fields are: `functions`, `main_block`
+
+error[E0609]: no field `blocks` on type `&mut MirFunction`
+  --> crates\kicomp\src\mir_opt.rs:27:20
+   |
+27 |     let len = func.blocks.len();
+   |                    ^^^^^^ unknown field
+   |
+   = note: available fields are: `name`, `args`, `return_ty`, `locals`, `basic_blocks`
+
+error[E0609]: no field `blocks` on type `&mut MirFunction`
+  --> crates\kicomp\src\mir_opt.rs:34:28
+   |
+34 |     for (i, block) in func.blocks.iter().enumerate() {
+   |                            ^^^^^^ unknown field
+   |
+   = note: available fields are: `name`, `args`, `return_ty`, `locals`, `basic_blocks`
+
+error[E0609]: no field `blocks` on type `&mut MirFunction`
+  --> crates\kicomp\src\mir_opt.rs:60:23
+   |
+60 |     for block in func.blocks.iter_mut() {
+   |                       ^^^^^^ unknown field
+   |
+   = note: available fields are: `name`, `args`, `return_ty`, `locals`, `basic_blocks`
+
+error[E0609]: no field `blocks` on type `&mut MirFunction`
+  --> crates\kicomp\src\mir_opt.rs:75:23
+   |
+75 |     for block in func.blocks.iter_mut() {
+   |                       ^^^^^^ unknown field
+   |
+   = note: available fields are: `name`, `args`, `return_ty`, `locals`, `basic_blocks`
+
+warning: unused variable: `sym_table`
+   --> crates\kicomp\src\lsp.rs:144:16
+    |
+144 |             Ok(sym_table) => {
+    |                ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_sym_table`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `traits`
+   --> crates\kicomp\src\lsp.rs:145:21
+    |
+145 |                 let traits = crate::trait_solver::TraitEnvironment::new();
+    |                     ^^^^^^ help: if this is intentional, prefix it with an underscore: `_traits`
+
+For more information about this error, try `rustc --explain E0609`.
+warning: `kinetix-kicomp` (lib) generated 3 warnings
+error: could not compile `kinetix-kicomp` (lib) due to 5 previous errors; 3 warnings emitted

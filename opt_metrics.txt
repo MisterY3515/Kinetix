@@ -1,0 +1,29 @@
+warning: unused imports: `BasicBlockData` and `MirStatement`
+ --> crates\kicomp\src\mir_opt.rs:4:43
+  |
+4 | ...m, BasicBlockData, TerminatorKind, MirStatement};
+  |       ^^^^^^^^^^^^^^                  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `kinetix-kicomp` (lib) generated 1 warning (run `cargo fix --lib -p kinetix-kicomp` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
+     Running `target\debug\kivm.exe exec tests/legacy/test_phase2_types.kix --metrics`
+
+ÔòöÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòù
+Ôòæ         Kinetix Compiler Metrics (Build 35)      Ôòæ
+ÔòÜÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòØ
+
+  Optimization Passes:
+    All Bytecode Passes               74 ÔåÆ    73 instrs  (-1.4%)  0.05ms
+
+  Summary:
+    Instructions before opt: 74
+    Instructions after opt:  73
+    Total reduction:         1 instructions (1.4%)
+
+Phase 2 basic arithmetic: OK
+Kinetix v0.0.6
+Phase 2 functions: OK
+Phase 2 loops: OK
+Phase 2 Type System Test Complete
