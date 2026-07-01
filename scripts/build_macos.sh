@@ -2,6 +2,9 @@
 # Build script for macOS (.pkg Installer)
 set -e
 
+# Load cargo into PATH if installed via rustup
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
 export KINETIX_BUILD="35"
 
 # Ensure we are running from the workspace root

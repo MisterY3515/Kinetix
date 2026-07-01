@@ -1,3 +1,20 @@
 /target
 *.log
-/crates/installer/target
+/crates/installer/target_installer
+
+# macOS
+.DS_Store
+
+# Build/dist output
+/dist
+/dist_mac
+/KinetixInstaller.exe
+
+# Transient debug/diagnostic dumps
+/errors.json
+/errors.txt
+/debug_output.txt
+/opt_metrics.txt
+/tests_error.txt
+/lsp_errors.txt
+/test_output.txt
