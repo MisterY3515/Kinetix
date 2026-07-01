@@ -19,19 +19,18 @@ SCRIPTS="$OUTPUT_DIR/scripts"
 echo "=== Building Kinetix for macOS (v$VERSION) ==="
 
 # 1. Build release binaries
-echo "[1/4] Compiling..."
+echo "[1/5] Compiling..."
 cargo build --release --package kinetix-cli --package kinetix-kicomp
 
 # 2. Build the GUI Installer (self-contained with embedded binaries)
-echo "[2/4] Building GUI Installer..."
+echo "[2/5] Building GUI Installer..."
 cargo build --release --package kinetix-installer
 
 # 3. Stage the payload for pkgbuild
-echo "[3/4] Staging payload..."
+echo "[3/5] Staging payload..."
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$STAGING/usr/local/bin"
 mkdir -p "$STAGING/usr/local/share/kinetix/assets"
-mkdir -p "$STAGING/Library/PreferencePanes"
 mkdir -p "$SCRIPTS"
 
 # Copy main binaries
@@ -47,25 +46,44 @@ if [ -f assets/logo/KiFile.png ]; then
     cp assets/logo/KiFile.png "$STAGING/usr/local/share/kinetix/assets/"
 fi
 
+# Build a real .icns from the source PNG (a PNG merely renamed .icns is not
+# a valid icon and Finder/LaunchServices will refuse to render it)
+ICNS_FILE=""
+if [ -f assets/logo/KiFile.png ] && command -v iconutil &> /dev/null && command -v sips &> /dev/null; then
+    ICONSET="$OUTPUT_DIR/KiFile.iconset"
+    mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z "$size" "$size" assets/logo/KiFile.png --out "$ICONSET/icon_${size}x${size}.png" > /dev/null
+        double=$((size * 2))
+        sips -z "$double" "$double" assets/logo/KiFile.png --out "$ICONSET/icon_${size}x${size}@2x.png" > /dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "$OUTPUT_DIR/KiFile.icns"
+    rm -rf "$ICONSET"
+    ICNS_FILE="$OUTPUT_DIR/KiFile.icns"
+fi
+
 # Create the handler .app bundle (for file associations)
 APP_DIR="$STAGING/Applications/Kinetix.app"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-# Launcher script
+# Launcher script. Runs in Terminal.app: a bundle launched from Finder has
+# no TTY attached, so exec'ing kivm directly produces a process with no
+# visible window and no way to read stdin.
 cat > "$APP_DIR/Contents/MacOS/KinetixEnv" <<'LAUNCHER'
 #!/bin/bash
 if [ -n "$1" ]; then
-  /usr/local/bin/kivm exec "$1"
+  ESCAPED_PATH=$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')
+  osascript -e "tell application \"Terminal\" to do script \"/usr/local/bin/kivm exec \\\"$ESCAPED_PATH\\\"\""
 else
-  /usr/local/bin/kivm shell
+  osascript -e 'tell application "Terminal" to do script "/usr/local/bin/kivm shell"'
 fi
 LAUNCHER
 chmod +x "$APP_DIR/Contents/MacOS/KinetixEnv"
 
 # Copy icon
-if [ -f assets/logo/KiFile.png ]; then
-    cp assets/logo/KiFile.png "$APP_DIR/Contents/Resources/KiFile.icns"
+if [ -n "$ICNS_FILE" ]; then
+    cp "$ICNS_FILE" "$APP_DIR/Contents/Resources/KiFile.icns"
 fi
 
 # Info.plist with file associations
@@ -107,54 +125,6 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Create System Preferences pane stub (like Java)
-PANE_DIR="$STAGING/Library/PreferencePanes/Kinetix.prefPane"
-mkdir -p "$PANE_DIR/Contents/MacOS"
-mkdir -p "$PANE_DIR/Contents/Resources"
-
-# Copy icon for prefpane
-if [ -f assets/logo/KiFile.png ]; then
-    cp assets/logo/KiFile.png "$PANE_DIR/Contents/Resources/KiFile.icns"
-fi
-
-# Launcher: opens the Kinetix Installer GUI (or a status window)
-cat > "$PANE_DIR/Contents/MacOS/Kinetix" <<'PREFPANE_LAUNCHER'
-#!/bin/bash
-# Opens the Kinetix Installer/Manager GUI
-if [ -x /usr/local/bin/KinetixInstaller ]; then
-    /usr/local/bin/KinetixInstaller "$@"
-else
-    osascript -e 'display dialog "Kinetix is not installed. Please reinstall." buttons {"OK"} default button "OK" with icon caution with title "Kinetix"'
-fi
-PREFPANE_LAUNCHER
-chmod +x "$PANE_DIR/Contents/MacOS/Kinetix"
-
-# Info.plist for the prefpane
-cat > "$PANE_DIR/Contents/Info.plist" <<'PREFPLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>Kinetix</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.mistery3515.kinetix.prefpane</string>
-    <key>CFBundleName</key>
-    <string>Kinetix</string>
-    <key>CFBundlePackageType</key>
-    <string>BNDL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>NSPrefPaneIconFile</key>
-    <string>KiFile.icns</string>
-    <key>NSPrefPaneIconLabel</key>
-    <string>Kinetix</string>
-    <key>NSPrincipalClass</key>
-    <string>NSPrefPane</string>
-</dict>
-</plist>
-PREFPLIST
-
 # Post-install script: refresh LaunchServices for file associations
 cat > "$SCRIPTS/postinstall" <<'POSTINSTALL'
 #!/bin/bash
@@ -164,8 +134,20 @@ echo "Kinetix installation complete."
 POSTINSTALL
 chmod +x "$SCRIPTS/postinstall"
 
-# 4. Build .pkg
-echo "[4/4] Creating .pkg..."
+# 4. Ad-hoc code sign (no Apple Developer ID configured yet).
+# This stops "no usable signature" warnings but does NOT satisfy Gatekeeper
+# for apps downloaded over the internet (quarantine flag) on other Macs --
+# that requires a paid Developer ID cert plus notarization via `notarytool`.
+echo "[4/5] Ad-hoc signing..."
+if command -v codesign &> /dev/null; then
+    codesign --force --sign - "$APP_DIR"
+    codesign --force --sign - "$STAGING/usr/local/bin/kivm"
+    codesign --force --sign - "$STAGING/usr/local/bin/kicomp"
+    codesign --force --sign - "$STAGING/usr/local/bin/KinetixInstaller"
+fi
+
+# 5. Build .pkg
+echo "[5/5] Creating .pkg..."
 if command -v pkgbuild &> /dev/null; then
     pkgbuild --root "$STAGING" \
              --identifier "$IDENTIFIER" \
