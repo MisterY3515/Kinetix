@@ -133,6 +133,50 @@ impl Compiler {
         None
     }
 
+    /// Emits the store instructions to write `val_reg` into `target` (Identifier/
+    /// MemberAccess/Index), plus the reactive State tick if `target` is a known
+    /// State node. Shared by `Expression::Assign` and by mutating array method
+    /// calls (`arr.push(x)`) that need to write their result back into `arr`.
+    fn emit_assign_to_target(&mut self, target: &Expression<'_>, val_reg: u16) -> Result<(), String> {
+        let mut target_name = None;
+
+        match target {
+            Expression::Identifier(name) => {
+                target_name = Some(name.clone());
+                if let Some(slot) = self.resolve_assign(name) {
+                    self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, val_reg));
+                } else {
+                    let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
+                    self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, val_reg));
+                }
+            }
+            Expression::MemberAccess { object, member } => {
+                let obj_reg = self.compile_expression(object)?;
+                let member_idx = self.current_fn().add_constant(Constant::String(member.clone()));
+                self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, member_idx, val_reg));
+            }
+            Expression::Index { left, index } => {
+                let obj_reg = self.compile_expression(left)?;
+                let idx_reg = self.compile_expression(index)?;
+                self.emit_instr(Instruction::new(Opcode::SetIndex, obj_reg, idx_reg, val_reg));
+            }
+            _ => return Err("Invalid assignment target".into()),
+        }
+
+        // --- REACTIVE STATE TRACKING ---
+        // If the user manually mutates a known State, tell the VM so it can tick
+        if let Some(name) = target_name {
+            if let Some(node) = self.program.reactive_graph.nodes.get(&name) {
+                if matches!(node.kind, crate::ir::ReactiveNodeKind::State) {
+                    let name_idx = self.current_fn().add_constant(Constant::String(name));
+                    self.emit_instr(Instruction::ab(Opcode::UpdateState, name_idx, val_reg));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // ========== Statements ==========
 
     fn compile_statement(&mut self, stmt: &Statement<'_>) -> Result<(), String> {
@@ -570,44 +614,7 @@ impl Compiler {
             }
             Expression::Assign { target, value } => {
                 let val_reg = self.compile_expression(value)?;
-                
-                // Track if target is an Identifier (to check Reactive Graph)
-                let mut target_name = None;
-
-                match target {
-                    Expression::Identifier(name) => {
-                        target_name = Some(name.clone());
-                        if let Some(slot) = self.resolve_assign(name) {
-                            self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, val_reg));
-                        } else {
-                            let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
-                            self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, val_reg));
-                        }
-                    }
-                    Expression::MemberAccess { object, member } => {
-                        let obj_reg = self.compile_expression(object)?;
-                        let member_idx = self.current_fn().add_constant(Constant::String(member.clone()));
-                        self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, member_idx, val_reg));
-                    }
-                    Expression::Index { left, index } => {
-                        let obj_reg = self.compile_expression(left)?;
-                        let idx_reg = self.compile_expression(index)?;
-                        self.emit_instr(Instruction::new(Opcode::SetIndex, obj_reg, idx_reg, val_reg));
-                    }
-                    _ => return Err("Invalid assignment target".into()),
-                }
-
-                // --- REACTIVE STATE TRACKING ---
-                // If the user manually mutates a known State, tell the VM so it can tick
-                if let Some(name) = target_name {
-                    if let Some(node) = self.program.reactive_graph.nodes.get(&name) {
-                        if matches!(node.kind, crate::ir::ReactiveNodeKind::State) {
-                            let name_idx = self.current_fn().add_constant(Constant::String(name));
-                            self.emit_instr(Instruction::ab(Opcode::UpdateState, name_idx, val_reg));
-                        }
-                    }
-                }
-
+                self.emit_assign_to_target(target, val_reg)?;
                 Ok(val_reg)
             }
             Expression::Call { function, arguments } => {
@@ -705,6 +712,14 @@ impl Compiler {
                             }
                         }
                         self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+
+                        // Array mutating methods (push/pop/remove_at/insert/reverse/sort) are
+                        // implemented natively as functional (return a new array) -- write the
+                        // result back into the receiver so the call also mutates it in place.
+                        if matches!(member.as_ref(), "push" | "pop" | "remove_at" | "insert" | "reverse" | "sort") {
+                            self.emit_assign_to_target(object, call_reg)?;
+                        }
+
                         return Ok(call_reg);
                     }
                 }

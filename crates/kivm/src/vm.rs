@@ -695,6 +695,14 @@ impl VM {
                     _ => return Err("LoadMethod: expected string method name".into()),
                 };
 
+                // Arrays are not class instances (no vtable) -- their "methods" are the
+                // native array.* builtins (push/pop/reverse/sort/len/contains/...),
+                // dispatched with the array itself as the receiver (self) argument.
+                if let Value::Array(_) = &obj {
+                    frame.set_reg(instr.a, Value::BoundMethod(Box::new(obj), Box::new(Value::NativeFn(method_name))));
+                    return Ok(StepResult::Continue);
+                }
+
                 let class_name = match &obj {
                     Value::Map(map) => {
                         match map.get("__class__") {
