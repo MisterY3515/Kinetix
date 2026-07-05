@@ -22,6 +22,33 @@ impl FreshCounter {
     }
 }
 
+/// Replaces every `Type::Var` placeholder in `ty` with a brand-new fresh variable,
+/// consistently (repeated occurrences of the same placeholder id map to the same
+/// new id within this one instantiation). Used to give each *use* of a generically-
+/// typed SymbolTable entry its own independent type variables.
+fn instantiate_fresh(ty: &Type, fresh: &mut FreshCounter) -> Type {
+    fn go(ty: &Type, fresh: &mut FreshCounter, mapping: &mut std::collections::HashMap<TypeVarId, Type>) -> Type {
+        match ty {
+            Type::Var(id) => mapping.entry(*id).or_insert_with(|| fresh.fresh()).clone(),
+            Type::Fn(params, ret) => Type::Fn(
+                params.iter().map(|p| go(p, fresh, mapping)).collect(),
+                Box::new(go(ret, fresh, mapping)),
+            ),
+            Type::Array(inner) => Type::Array(Box::new(go(inner, fresh, mapping))),
+            Type::Map(k, v) => Type::Map(Box::new(go(k, fresh, mapping)), Box::new(go(v, fresh, mapping))),
+            Type::Ref(inner) => Type::Ref(Box::new(go(inner, fresh, mapping))),
+            Type::MutRef(inner) => Type::MutRef(Box::new(go(inner, fresh, mapping))),
+            Type::Custom { name, args } => Type::Custom {
+                name: name.clone(),
+                args: args.iter().map(|a| go(a, fresh, mapping)).collect(),
+            },
+            _ => ty.clone(), // Int, Float, Bool, Str, Void -- no Vars inside
+        }
+    }
+    let mut mapping = std::collections::HashMap::new();
+    go(ty, fresh, &mut mapping)
+}
+
 // ──────────────────── HIR Nodes ────────────────────
 
 #[derive(Debug, Clone)]
@@ -430,7 +457,13 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
                 t.clone()
             } else if let Some(t) = symbols.resolve(name).map(|s| s.ty.clone()) {
                 // Fallback: builtins, functions, classes registered in the SymbolTable.
-                t
+                // Generic builtins (map/push/contains/...) are registered with
+                // placeholder Type::Var slots that are shared verbatim across every
+                // occurrence in the SymbolTable; instantiate a fresh copy per use site
+                // (let-polymorphism instantiation) so two unrelated calls to the same
+                // generic builtin don't spuriously unify with each other. This is a
+                // no-op for ordinary user functions, whose declared types are concrete.
+                instantiate_fresh(&t, fresh)
             } else {
                 let fr = fresh.fresh();
                 env.insert(name.clone(), fr.clone());

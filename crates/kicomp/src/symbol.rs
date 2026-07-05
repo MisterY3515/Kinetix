@@ -105,6 +105,62 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
     table.define("println", Type::Fn(vec![Type::Var(0)], Box::new(Type::Void)), false);
     table.define("print", Type::Fn(vec![Type::Var(0)], Box::new(Type::Void)), false);
 
+    // Global builtins from kivm::builtins::BUILTIN_NAMES (bare, non-dotted names only --
+    // dotted names like "Math.abs"/"system.os.name" are dispatched via MemberAccess and
+    // never resolved as identifiers, so they don't need a symbol table entry).
+    // Signatures are intentionally permissive (Type::Var for anything dynamically-typed)
+    // and match each builtin's primary call arity; a handful of builtins accept an
+    // optional trailing argument (input, assert, stop/exit, pad_left/pad_right's pad
+    // char, min/max's 2-arg numeric form) which is not modeled here and will still fail
+    // symbol/type resolution if used -- known boundary, see Gestione/roadmap.md.
+    for (name, ty) in [
+        ("input", Type::Fn(vec![Type::Str], Box::new(Type::Str))),
+        ("len", Type::Fn(vec![Type::Var(0)], Box::new(Type::Int))),
+        ("typeof", Type::Fn(vec![Type::Var(0)], Box::new(Type::Str))),
+        ("assert", Type::Fn(vec![Type::Bool], Box::new(Type::Void))),
+        ("str", Type::Fn(vec![Type::Var(0)], Box::new(Type::Str))),
+        ("int", Type::Fn(vec![Type::Var(0)], Box::new(Type::Int))),
+        ("float", Type::Fn(vec![Type::Var(0)], Box::new(Type::Float))),
+        ("bool", Type::Fn(vec![Type::Var(0)], Box::new(Type::Bool))),
+        ("byte", Type::Fn(vec![Type::Var(0)], Box::new(Type::Int))),
+        ("char", Type::Fn(vec![Type::Var(0)], Box::new(Type::Str))),
+        ("stop", Type::Fn(vec![], Box::new(Type::Void))),
+        ("exit", Type::Fn(vec![], Box::new(Type::Void))),
+        ("copy", Type::Fn(vec![Type::Var(0)], Box::new(Type::Var(0)))),
+
+        ("to_upper", Type::Fn(vec![Type::Str], Box::new(Type::Str))),
+        ("to_lower", Type::Fn(vec![Type::Str], Box::new(Type::Str))),
+        ("trim", Type::Fn(vec![Type::Str], Box::new(Type::Str))),
+        ("split", Type::Fn(vec![Type::Str, Type::Str], Box::new(Type::Array(Box::new(Type::Str))))),
+        ("replace", Type::Fn(vec![Type::Str, Type::Str, Type::Str], Box::new(Type::Str))),
+        ("contains", Type::Fn(vec![Type::Var(0), Type::Var(1)], Box::new(Type::Bool))),
+        ("starts_with", Type::Fn(vec![Type::Str, Type::Str], Box::new(Type::Bool))),
+        ("ends_with", Type::Fn(vec![Type::Str, Type::Str], Box::new(Type::Bool))),
+        ("pad_left", Type::Fn(vec![Type::Str, Type::Int], Box::new(Type::Str))),
+        ("pad_right", Type::Fn(vec![Type::Str, Type::Int], Box::new(Type::Str))),
+        ("join", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Str], Box::new(Type::Str))),
+
+        ("push", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(0)], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("pop", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("remove_at", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Int], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("insert", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Int, Type::Var(0)], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("reverse", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("sort", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("min", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Var(0)))),
+        ("max", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Var(0)))),
+        ("any", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(1)], Box::new(Type::Bool))),
+        ("all", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(1)], Box::new(Type::Bool))),
+
+        ("range", Type::Fn(vec![Type::Int, Type::Int], Box::new(Type::Array(Box::new(Type::Int))))),
+        ("enumerate", Type::Fn(vec![Type::Array(Box::new(Type::Var(0)))], Box::new(Type::Array(Box::new(Type::Var(1)))))),
+        ("zip", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Array(Box::new(Type::Var(1)))], Box::new(Type::Array(Box::new(Type::Var(2)))))),
+        ("map", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(1)], Box::new(Type::Array(Box::new(Type::Var(2)))))),
+        ("filter", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(1)], Box::new(Type::Array(Box::new(Type::Var(0)))))),
+        ("reduce", Type::Fn(vec![Type::Array(Box::new(Type::Var(0))), Type::Var(1), Type::Var(2)], Box::new(Type::Var(2)))),
+    ] {
+        table.define(name, ty, false);
+    }
+
     // M2 Builtins
     let t = Type::Var(1); // Generic T
     let e = Type::Var(2); // Generic E

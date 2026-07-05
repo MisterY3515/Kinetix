@@ -275,6 +275,66 @@ impl VM {
         }
     }
 
+    /// Executes `func` with `args` to completion right now, re-entrantly, without
+    /// disturbing the caller's call stack. Used by native builtins that need to
+    /// invoke a Kinetix closure/function synchronously (map/filter/reduce/any/all).
+    pub fn call_function_now(&mut self, func: Value, args: Vec<Value>) -> Result<Value, String> {
+        let base_len = self.call_stack.len();
+
+        // Dummy frame to catch the return value in reg 0, mirroring run_function().
+        let dummy_frame = CallFrame::new(CompiledFunction {
+            instructions: vec![Instruction { opcode: Opcode::Halt, a: 0, b: 0, c: 0 }],
+            constants: vec![],
+            arity: 0,
+            locals: 1,
+            param_names: vec![],
+            line_map: vec![],
+            name: "callback_root".to_string(),
+        }, vec![], None);
+        self.call_stack.push(dummy_frame);
+
+        self.call_value(func, args, Some(0))?;
+
+        loop {
+            if self.call_stack.len() <= base_len {
+                break; // Defensive: our dummy frame was popped without a Halt.
+            }
+
+            let result = match self.step() {
+                Ok(r) => r,
+                Err(e) => return Err(self.runtime_error(&e)),
+            };
+            match result {
+                StepResult::Continue => {}
+                StepResult::Halt => break, // Our dummy frame's Halt: callback finished.
+                StepResult::Return(val) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    if let Some(reg) = popped.return_to_reg {
+                        if let Some(parent) = self.call_stack.last_mut() {
+                            parent.set_reg(reg, val);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                StepResult::Call(f, a, dest_reg) => {
+                    self.call_value(f, a, Some(dest_reg))?;
+                }
+                StepResult::TailCall(f, a) => {
+                    let popped = self.call_stack.pop().expect("Stack underflow");
+                    let ret_reg = popped.return_to_reg;
+                    self.call_value(f, a, ret_reg)?;
+                }
+            }
+        }
+
+        let result = self.call_stack.get(base_len)
+            .map(|f| f.reg(0).clone())
+            .unwrap_or(Value::Null);
+        self.call_stack.truncate(base_len);
+        Ok(result)
+    }
+
     pub fn run(&mut self) -> Result<(), String> {
         let mut ticks = 0;
         const MAX_TICKS: usize = 1000; // Prevent infinite reactive loops

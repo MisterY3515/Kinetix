@@ -147,15 +147,25 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
         "sort" => call_builtin("array.sort", args, vm),
         
         "any" => {
-            if let (Some(Value::Array(_arr)), Some(Value::Function(_))) = (args.get(0), args.get(1)) {
-                // Cannot execute callback here easily without &mut VM
-                Err("Feature 'any' with callback not yet supported in builtins".into())
-            } else { Err("Invalid args for any".into()) } 
+            if let (Some(Value::Array(arr)), Some(callback)) = (args.get(0), args.get(1)) {
+                let (arr, callback) = (arr.clone(), callback.clone());
+                for item in arr {
+                    if vm.call_function_now(callback.clone(), vec![item])?.is_truthy() {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                Ok(Value::Bool(false))
+            } else { Err("Invalid args for any".into()) }
         },
         "all" => {
-            if let (Some(Value::Array(_arr)), Some(Value::Function(_))) = (args.get(0), args.get(1)) {
-                // Cannot execute callback here easily without &mut VM
-                Err("Feature 'all' with callback not yet supported in builtins".into())
+            if let (Some(Value::Array(arr)), Some(callback)) = (args.get(0), args.get(1)) {
+                let (arr, callback) = (arr.clone(), callback.clone());
+                for item in arr {
+                    if !vm.call_function_now(callback.clone(), vec![item])?.is_truthy() {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                Ok(Value::Bool(true))
             } else { Err("Invalid args for all".into()) }
         },
 
@@ -292,7 +302,38 @@ pub fn call_builtin(name: &str, args: &[Value], vm: &mut VM) -> Result<Value, St
                  Ok(Value::Array(res))
              } else { Ok(Value::Null) }
         },
-        "map" | "filter" | "reduce" => Err("Functional iterators require callbacks (not implemented yet)".into()),
+        "map" => {
+            if let (Some(Value::Array(arr)), Some(callback)) = (args.get(0), args.get(1)) {
+                let (arr, callback) = (arr.clone(), callback.clone());
+                let mut res = Vec::with_capacity(arr.len());
+                for item in arr {
+                    res.push(vm.call_function_now(callback.clone(), vec![item])?);
+                }
+                Ok(Value::Array(res))
+            } else { Err("map expects (array, function)".into()) }
+        },
+        "filter" => {
+            if let (Some(Value::Array(arr)), Some(callback)) = (args.get(0), args.get(1)) {
+                let (arr, callback) = (arr.clone(), callback.clone());
+                let mut res = Vec::new();
+                for item in arr {
+                    if vm.call_function_now(callback.clone(), vec![item.clone()])?.is_truthy() {
+                        res.push(item);
+                    }
+                }
+                Ok(Value::Array(res))
+            } else { Err("filter expects (array, function)".into()) }
+        },
+        "reduce" => {
+            if let (Some(Value::Array(arr)), Some(callback), Some(init)) = (args.get(0), args.get(1), args.get(2)) {
+                let (arr, callback) = (arr.clone(), callback.clone());
+                let mut acc = init.clone();
+                for item in arr {
+                    acc = vm.call_function_now(callback.clone(), vec![acc, item])?;
+                }
+                Ok(acc)
+            } else { Err("reduce expects (array, function, initial_value)".into()) }
+        },
 
         // --- Conversions ---
         "byte" => {
