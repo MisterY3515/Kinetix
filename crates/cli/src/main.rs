@@ -335,7 +335,7 @@ fn run() -> Result<(), String> {
     match cli.command {
         Commands::Run { file, audit } => {
             if file.extension().map_or(false, |ext| ext == "kix") {
-                return Err(format!("'{}' is a source file. Use 'kivm compile --run {}' instead.", file.display(), file.display()));
+                return Err(format!("'{}' is a source file. Use 'kivm exec {}' instead.", file.display(), file.display()));
             }
 
             let data = fs::read(&file).map_err(|e| format!("Error reading {}: {}", file.display(), e))?;
