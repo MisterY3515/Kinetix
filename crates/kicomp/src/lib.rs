@@ -8,6 +8,7 @@ pub mod llvm_codegen;
 pub mod exn;
 pub mod types;
 pub mod symbol;
+pub mod pattern;
 pub mod hir;
 pub mod typeck;
 pub mod mir;

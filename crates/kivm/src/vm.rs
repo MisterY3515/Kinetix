@@ -765,9 +765,9 @@ impl VM {
 
                 let class_name = match &obj {
                     Value::Map(map) => {
-                        match map.get("__class__") {
+                        match map.get("__class__").or_else(|| map.get("__enum__")) {
                             Some(Value::Str(c)) => c.clone(),
-                            _ => return Err("LoadMethod: object is a map but has no __class__ field".into()),
+                            _ => return Err("LoadMethod: object is a map but has no __class__ or __enum__ field".into()),
                         }
                     }
                     _ => return Err("LoadMethod: object is not a class instance".into()),

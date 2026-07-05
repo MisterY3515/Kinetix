@@ -44,6 +44,12 @@ pub struct Compiler {
     max_temp: u16,
     /// Current source line number being compiled (for line_map).
     pub current_line: u32,
+    /// Names of no-payload enum variants (`Red` in `enum Color { Red, ... }`,
+    /// or the built-in `None`), collected by a pre-scan in `compile()`. A bare
+    /// identifier match-arm pattern is ambiguous at the AST level (`None` vs a
+    /// catch-all binding `x`) -- this set disambiguates it, mirroring the fix
+    /// applied to the same ambiguity in `hir.rs` (`SymbolTable::is_nullary_variant`).
+    known_nullary_variants: std::collections::HashSet<String>,
 }
 
 impl Compiler {
@@ -54,6 +60,7 @@ impl Compiler {
             next_temp: 0,
             max_temp: 0,
             current_line: 1,
+            known_nullary_variants: std::collections::HashSet::new(),
         }
     }
 
@@ -66,6 +73,32 @@ impl Compiler {
             self.program.reactive_graph = rg;
         }
 
+        // Pre-scan: collect nullary variant names before compiling anything,
+        // so a match expression can classify a bare-identifier pattern
+        // correctly regardless of where its enum is declared in the file.
+        self.known_nullary_variants.insert("None".to_string());
+        for stmt in statements {
+            if let Statement::Enum { variants, .. } = stmt {
+                for (vname, payload) in variants {
+                    if payload.is_none() {
+                        self.known_nullary_variants.insert(vname.clone());
+                    }
+                }
+            }
+        }
+
+        // Built-in Option/Result constructors: always available at runtime,
+        // regardless of whether the user also declares `enum Option<T> {...}`
+        // themselves (symbol.rs pre-registers Some/None/Ok/Err unconditionally
+        // too). A user's own enum declaration, if present, simply re-emits
+        // equivalent globals later at its point in program order.
+        let none_reg = self.emit_nullary_variant_value("Option", "None");
+        let none_const = self.current_fn().add_constant(Constant::String("None".to_string()));
+        self.emit_instr(Instruction::ab(Opcode::SetGlobal, none_const, none_reg));
+        self.compile_variant_constructor("Option", "Some");
+        self.compile_variant_constructor("Result", "Ok");
+        self.compile_variant_constructor("Result", "Err");
+
         for stmt in statements {
             self.compile_statement(stmt)?;
             if let Some(scope) = self.scopes.last() {
@@ -74,11 +107,80 @@ impl Compiler {
         }
         self.program.main.locals = self.max_temp;
         self.emit_instr(Instruction::a_only(Opcode::Halt, 0));
-        
+
         // Static VTable Build Post-Monomorphization equivalent for AST pipeline
         self.program.vtable = crate::vtable::build_vtable(&self.program);
-        
+
         Ok(&self.program)
+    }
+
+    /// Builds a tagged enum instance (`Value::Map` with `__enum__`/`__variant__`/
+    /// `__payload__` keys, mirroring the `__class__` convention for class
+    /// instances) for a no-payload variant, in the *current* function. Returns
+    /// the register holding it.
+    fn emit_nullary_variant_value(&mut self, enum_name: &str, variant_name: &str) -> u16 {
+        let reg = self.alloc_register();
+        self.emit_instr(Instruction::ab(Opcode::MakeMap, reg, 0));
+
+        let enum_key = self.current_fn().add_constant(Constant::String("__enum__".to_string()));
+        let enum_val = self.current_fn().add_constant(Constant::String(enum_name.to_string()));
+        let enum_val_reg = self.alloc_register();
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, enum_val_reg, enum_val));
+        self.emit_instr(Instruction::new(Opcode::SetMember, reg, enum_key, enum_val_reg));
+
+        let variant_key = self.current_fn().add_constant(Constant::String("__variant__".to_string()));
+        let variant_val = self.current_fn().add_constant(Constant::String(variant_name.to_string()));
+        let variant_val_reg = self.alloc_register();
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, variant_val_reg, variant_val));
+        self.emit_instr(Instruction::new(Opcode::SetMember, reg, variant_key, variant_val_reg));
+
+        let payload_key = self.current_fn().add_constant(Constant::String("__payload__".to_string()));
+        let null_reg = self.alloc_register();
+        self.emit_instr(Instruction::a_only(Opcode::LoadNull, null_reg));
+        self.emit_instr(Instruction::new(Opcode::SetMember, reg, payload_key, null_reg));
+
+        reg
+    }
+
+    /// Compiles a synthetic 1-arity function `EnumName::VariantName` that
+    /// builds a tagged enum instance around its single argument (the payload),
+    /// and registers it as a global under `variant_name` -- the same "flattened
+    /// name as global" convention `compile_function` uses for class methods.
+    fn compile_variant_constructor(&mut self, enum_name: &str, variant_name: &str) {
+        let func_name = format!("{}::{}", enum_name, variant_name);
+        let mut func = CompiledFunction::new(func_name, 1);
+        func.param_names = vec!["payload".to_string()];
+
+        let saved_main = std::mem::replace(&mut self.program.main, func);
+        let saved_temp = self.next_temp;
+        let saved_max = self.max_temp;
+        self.next_temp = 0;
+        self.max_temp = 0;
+
+        self.scopes.push(Scope::new(0));
+        self.current_scope_mut().define("payload"); // register 0
+        self.next_temp = 1;
+        self.max_temp = 1;
+
+        let map_reg = self.emit_nullary_variant_value(enum_name, variant_name);
+        let payload_key = self.current_fn().add_constant(Constant::String("__payload__".to_string()));
+        self.emit_instr(Instruction::new(Opcode::SetMember, map_reg, payload_key, 0));
+        self.emit_instr(Instruction::a_only(Opcode::Return, map_reg));
+        self.scopes.pop();
+
+        let mut compiled_func = std::mem::replace(&mut self.program.main, saved_main);
+        compiled_func.locals = self.max_temp;
+        self.next_temp = saved_temp;
+        self.max_temp = saved_max;
+
+        let func_idx = self.program.functions.len();
+        self.program.functions.push(compiled_func);
+
+        let name_const = self.current_fn().add_constant(Constant::String(variant_name.to_string()));
+        let reg = self.alloc_register();
+        let idx_const = self.current_fn().add_constant(Constant::Function(func_idx));
+        self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx_const));
+        self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_const, reg));
     }
 
     fn current_fn(&mut self) -> &mut CompiledFunction {
@@ -195,6 +297,47 @@ impl Compiler {
                 self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
             }
         }
+    }
+
+    /// Compiles `stmt` as a value-producing block: if its last statement is an
+    /// expression-statement, that expression's value ends up in `result_reg`;
+    /// otherwise `result_reg` stays `Null`. Used to give `if`/`match` a real
+    /// value in expression position (`let x = if cond { 1 } else { 2 }`),
+    /// which previously left `result_reg` uninitialized. Pushes/pops its own
+    /// scope when `stmt` is a `Block`, so locals declared inside a branch
+    /// don't leak into the enclosing scope.
+    fn compile_block_as_value(&mut self, stmt: &Statement<'_>, result_reg: u16) -> Result<(), String> {
+        self.emit_instr(Instruction::a_only(Opcode::LoadNull, result_reg));
+
+        let write_last = |c: &mut Self, s: &Statement<'_>| -> Result<(), String> {
+            if let Statement::Expression { expression, .. } = s {
+                let val_reg = c.compile_expression(expression)?;
+                if val_reg != result_reg {
+                    c.emit_instr(Instruction::ab(Opcode::SetLocal, result_reg, val_reg));
+                }
+                Ok(())
+            } else {
+                c.compile_statement(s)
+            }
+        };
+
+        if let Statement::Block { statements, .. } = stmt {
+            self.scopes.push(Scope::new(self.next_temp));
+            for (i, s) in statements.iter().enumerate() {
+                if i + 1 == statements.len() {
+                    write_last(self, s)?;
+                } else {
+                    self.compile_statement(s)?;
+                    if let Some(scope) = self.scopes.last() {
+                        self.next_temp = scope.next_register;
+                    }
+                }
+            }
+            self.scopes.pop();
+        } else {
+            write_last(self, stmt)?;
+        }
+        Ok(())
     }
 
     // ========== Statements ==========
@@ -409,10 +552,41 @@ impl Compiler {
                     }
                 }
             }
-            Statement::Struct { .. } 
-            | Statement::Enum { .. } | Statement::Trait { .. } | Statement::Impl { .. } => {
-                // Deferred to M4 / Phase 2
+            Statement::Enum { name, variants, .. } => {
+                // Each variant becomes a global: a no-payload variant (`Red`)
+                // is a plain tagged value; a payload variant (`Circle(f)`) is
+                // a 1-arity constructor function -- see
+                // `emit_nullary_variant_value`/`compile_variant_constructor`.
+                for (variant_name, payload) in variants {
+                    if payload.is_some() {
+                        self.compile_variant_constructor(name, variant_name);
+                    } else {
+                        let reg = self.emit_nullary_variant_value(name, variant_name);
+                        let name_const = self.current_fn().add_constant(Constant::String(variant_name.clone()));
+                        self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_const, reg));
+                    }
+                }
             }
+            Statement::Impl { target_name, methods, .. } => {
+                // Same flattened-global-per-method convention as `Statement::Class`,
+                // so `LoadMethod`'s existing dispatch (vtable, falling back to a
+                // `"Target::method"` global lookup) picks these up for any
+                // instance whose `__class__` matches `target_name`. `trait_name`/
+                // generics are compile-time-only (already checked by
+                // `trait_solver.rs`), no codegen needed for them.
+                for method in methods {
+                    if let Statement::Function { name: method_name, parameters, body, .. } = method {
+                        let flat_name = format!("{}::{}", target_name, method_name);
+                        self.compile_function(&flat_name, parameters, body)?;
+                    }
+                }
+            }
+            // `struct`/`trait` declarations have no runtime footprint of their
+            // own: a struct's instantiation is `Expression::StructLiteral`
+            // (compiled independently of how/whether the type was declared),
+            // and a trait is a pure compile-time interface (method signatures
+            // only, no bodies -- those live in `impl` blocks, above).
+            Statement::Struct { .. } | Statement::Trait { .. } => {}
             Statement::Break { .. } | Statement::Continue { .. } => {
                 // Handled by loop context (M4)
             }
@@ -796,22 +970,14 @@ impl Compiler {
                 let result_reg = self.alloc_register();
                 let jump_else = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
 
-                if let Statement::Block { statements, .. } = *consequence {
-                    for s in statements {
-                        self.compile_statement(s)?;
-                    }
-                }
+                self.compile_block_as_value(consequence, result_reg)?;
 
                 if let Some(alt) = alternative {
                     let jump_end = self.emit_instr(Instruction::a_only(Opcode::Jump, 0));
                     let else_pos = self.current_fn().instructions.len();
                     self.current_fn().instructions[jump_else].a = else_pos as u16;
 
-                    if let Statement::Block { statements, .. } = *alt {
-                        for s in statements {
-                            self.compile_statement(s)?;
-                        }
-                    }
+                    self.compile_block_as_value(alt, result_reg)?;
 
                     let end_pos = self.current_fn().instructions.len();
                     self.current_fn().instructions[jump_end].a = end_pos as u16;
@@ -853,11 +1019,111 @@ impl Compiler {
                 self.emit_instr(Instruction::ab(Opcode::LoadConst, reg, idx));
                 Ok(reg)
             }
-            Expression::Range { .. } | Expression::MapLiteral(_) | Expression::Match { .. } => {
+            Expression::Match { value, arms } => self.compile_match(value, arms),
+            Expression::Range { .. } | Expression::MapLiteral(_) => {
                 let reg = self.alloc_register();
                 self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
                 Ok(reg)
             }
         }
+    }
+
+    /// Defines `name` as a new local bound to `value_reg` in the *current*
+    /// scope, keeping `next_temp` in sync with the scope's own counter (see
+    /// `compile_function`'s parameter registration for the same pattern) --
+    /// `Scope::define` alone would silently let a later `alloc_register()`
+    /// reuse the same slot, aliasing the binding.
+    fn bind_local(&mut self, name: &str, value_reg: u16) {
+        let slot = self.current_scope_mut().define(name);
+        if self.next_temp <= slot {
+            self.next_temp = slot + 1;
+        }
+        if self.next_temp > self.max_temp {
+            self.max_temp = self.next_temp;
+        }
+        if slot != value_reg {
+            self.emit_instr(Instruction::ab(Opcode::SetLocal, slot, value_reg));
+        }
+    }
+
+    /// Real bytecode for `match` (Phase 2 ADTs: previously a `LoadNull` stub).
+    /// Each arm's pattern is classified exactly as `hir.rs` classifies
+    /// `HirPattern` (same nullary-variant-vs-binding disambiguation via
+    /// `known_nullary_variants`), then compiled to a runtime test:
+    /// - Wildcard/Binding: no test, always matches.
+    /// - Literal: `Eq` against the compiled literal.
+    /// - Variant: `Eq` on the tagged value's `__variant__` field, with an
+    ///   optional payload binding read from `__payload__`.
+    /// All arms write into the same `result_reg` (via `compile_block_as_value`)
+    /// and jump to the end, giving `match` a real value in expression position.
+    fn compile_match(&mut self, value: &Expression<'_>, arms: &[(Expression<'_>, &Statement<'_>)]) -> Result<u16, String> {
+        let value_reg = self.compile_expression(value)?;
+        let result_reg = self.alloc_register();
+        self.emit_instr(Instruction::a_only(Opcode::LoadNull, result_reg));
+
+        let mut end_jumps = Vec::new();
+
+        for (pattern, body) in arms {
+            use crate::pattern::ArmPattern;
+            let classified = crate::pattern::classify_pattern(pattern, |n| self.known_nullary_variants.contains(n));
+
+            match classified {
+                ArmPattern::Wildcard => {
+                    self.compile_block_as_value(body, result_reg)?;
+                    end_jumps.push(self.emit_instr(Instruction::a_only(Opcode::Jump, 0)));
+                }
+                ArmPattern::Binding(name) => {
+                    self.scopes.push(Scope::new(self.next_temp));
+                    self.bind_local(&name, value_reg);
+                    self.compile_block_as_value(body, result_reg)?;
+                    self.scopes.pop();
+                    end_jumps.push(self.emit_instr(Instruction::a_only(Opcode::Jump, 0)));
+                }
+                ArmPattern::Literal(lit_expr) => {
+                    let lit_reg = self.compile_expression(lit_expr)?;
+                    let cond_reg = self.alloc_register();
+                    self.emit_instr(Instruction::new(Opcode::Eq, cond_reg, value_reg, lit_reg));
+                    let jump_next = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
+
+                    self.compile_block_as_value(body, result_reg)?;
+                    end_jumps.push(self.emit_instr(Instruction::a_only(Opcode::Jump, 0)));
+
+                    let next_pos = self.current_fn().instructions.len();
+                    self.current_fn().instructions[jump_next].a = next_pos as u16;
+                }
+                ArmPattern::Variant { name, binding } => {
+                    let variant_key = self.current_fn().add_constant(Constant::String("__variant__".to_string()));
+                    let tag_reg = self.alloc_register();
+                    self.emit_instr(Instruction::new(Opcode::GetMember, tag_reg, value_reg, variant_key));
+                    let name_idx = self.current_fn().add_constant(Constant::String(name));
+                    let name_reg = self.alloc_register();
+                    self.emit_instr(Instruction::ab(Opcode::LoadConst, name_reg, name_idx));
+                    let cond_reg = self.alloc_register();
+                    self.emit_instr(Instruction::new(Opcode::Eq, cond_reg, tag_reg, name_reg));
+                    let jump_next = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
+
+                    self.scopes.push(Scope::new(self.next_temp));
+                    if let Some(bname) = binding {
+                        let payload_key = self.current_fn().add_constant(Constant::String("__payload__".to_string()));
+                        let payload_reg = self.alloc_register();
+                        self.emit_instr(Instruction::new(Opcode::GetMember, payload_reg, value_reg, payload_key));
+                        self.bind_local(&bname, payload_reg);
+                    }
+                    self.compile_block_as_value(body, result_reg)?;
+                    self.scopes.pop();
+
+                    end_jumps.push(self.emit_instr(Instruction::a_only(Opcode::Jump, 0)));
+                    let next_pos = self.current_fn().instructions.len();
+                    self.current_fn().instructions[jump_next].a = next_pos as u16;
+                }
+            }
+        }
+
+        let end_pos = self.current_fn().instructions.len();
+        for idx in end_jumps {
+            self.current_fn().instructions[idx].a = end_pos as u16;
+        }
+
+        Ok(result_reg)
     }
 }

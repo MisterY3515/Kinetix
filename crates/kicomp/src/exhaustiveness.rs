@@ -5,7 +5,7 @@ use crate::symbol::SymbolTable;
 /// Validates that a list of match arms exhaustively covers the structural space of `match_ty`.
 /// For Kinetix Phase 2, we implement a 1D mapping matrix to evaluate Enum variant coverage
 /// and Primitive infinite domain coverage.
-pub fn check_exhaustiveness(match_ty: &Type, arms: &[HirPattern], _symbols: &SymbolTable) -> Result<(), String> {
+pub fn check_exhaustiveness(match_ty: &Type, arms: &[HirPattern], symbols: &SymbolTable) -> Result<(), String> {
     // 1. Wildcard (`_`) or unconditional binding (`x`) provides immediate exhaustive coverage.
     for arm in arms {
         match arm {
@@ -30,27 +30,23 @@ pub fn check_exhaustiveness(match_ty: &Type, arms: &[HirPattern], _symbols: &Sym
             Ok(())
         }
         Type::Custom { name, .. } => {
-            // For Kinetix Phase 2, we only fully support Option and Result builtins as exhaustively checked enums.
-            // User-defined enums require AST variant lookup, which we simulate for Option/Result.
-            let variants = match name.as_str() {
-                "Option" => vec!["Some", "None"],
-                "Result" => vec!["Ok", "Err"],
-                _ => {
-                    // For custom user structs/classes, a wildcard or binding is required.
-                    return Err(format!("Non-exhaustive match. Type '{}' requires a catch-all bound", name));
-                }
+            // Any registered enum (built-in Option/Result or user-declared via
+            // `enum`) is checked structurally against its variant list.
+            let Some(enum_def) = symbols.enums.get(name) else {
+                // For custom user structs/classes (not enums), a wildcard or binding is required.
+                return Err(format!("Non-exhaustive match. Type '{}' requires a catch-all bound", name));
             };
-            
+
             let mut covered_variants = std::collections::HashSet::new();
             for arm in arms {
                 if let HirPattern::Variant { name: var_name, .. } = arm {
                     covered_variants.insert(var_name.clone());
                 }
             }
-            
-            for var in variants {
-                if !covered_variants.contains(var) {
-                    return Err(format!("Missing coverage for variant: {}", var));
+
+            for (vname, _) in &enum_def.variants {
+                if !covered_variants.contains(vname) {
+                    return Err(format!("Missing coverage for variant: {}", vname));
                 }
             }
             Ok(())

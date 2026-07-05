@@ -28,6 +28,16 @@ pub struct StructDef {
     pub methods: std::collections::HashMap<String, Type>,
 }
 
+/// A registry for enum definitions: the ordered variant list (name + optional
+/// payload type), used by `exhaustiveness.rs` to check variant coverage and by
+/// `hir.rs` to tell a nullary-variant pattern (`None`) apart from a catch-all
+/// binding pattern (`x`) -- both parse as a bare `Expression::Identifier`.
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<(String, Option<Type>)>,
+}
+
 /// A scope-aware symbol table with nested scopes.
 #[derive(Debug)]
 pub struct SymbolTable {
@@ -35,6 +45,7 @@ pub struct SymbolTable {
     scopes: Vec<HashMap<String, Symbol>>,
     next_var: u32,
     pub custom_types: HashMap<String, StructDef>,
+    pub enums: HashMap<String, EnumDef>,
 }
 
 impl SymbolTable {
@@ -43,7 +54,16 @@ impl SymbolTable {
             scopes: vec![HashMap::new()], // global scope
             next_var: 1,
             custom_types: HashMap::new(),
+            enums: HashMap::new(),
         }
+    }
+
+    /// True if `name` is a known variant with no payload (e.g. `None`, or a
+    /// user-declared nullary variant like `Red` in `enum Color { Red, ... }`).
+    /// Used to classify a match arm's bare identifier as a variant pattern
+    /// rather than a catch-all binding.
+    pub fn is_nullary_variant(&self, name: &str) -> bool {
+        self.enums.values().any(|e| e.variants.iter().any(|(vn, payload)| vn == name && payload.is_none()))
     }
 
     pub fn fresh_var(&mut self) -> Type {
@@ -170,12 +190,20 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
     table.define("Option", option_t.clone(), false);
     table.define("Some", Type::Fn(vec![t.clone()], Box::new(option_t.clone())), false);
     table.define("None", option_t.clone(), false); // Note: None in Rust is highly polymorphic, keeping it simple for now
+    table.enums.insert("Option".to_string(), EnumDef {
+        name: "Option".to_string(),
+        variants: vec![("Some".to_string(), Some(t.clone())), ("None".to_string(), None)],
+    });
 
     // Result<T,E>
     let result_t = Type::Custom { name: "Result".to_string(), args: vec![t.clone(), e.clone()] };
     table.define("Result", result_t.clone(), false);
     table.define("Ok", Type::Fn(vec![t.clone()], Box::new(result_t.clone())), false);
     table.define("Err", Type::Fn(vec![e.clone()], Box::new(result_t.clone())), false);
+    table.enums.insert("Result".to_string(), EnumDef {
+        name: "Result".to_string(),
+        variants: vec![("Ok".to_string(), Some(t.clone())), ("Err".to_string(), Some(e.clone()))],
+    });
 
     // First pass: register all top-level function and type definitions
     for stmt in statements {
@@ -223,10 +251,67 @@ pub fn resolve_program<'a>(statements: &[Statement<'a>]) -> Result<SymbolTable, 
                 });
                 table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
             }
-            Statement::Enum { name, .. } => {
-                table.define(name, Type::Custom { name: name.clone(), args: vec![] }, false);
+            Statement::Enum { name, generics, variants, .. } => {
+                // Ordered (name, fresh Type::Var) pairs -- a Vec, not a HashMap,
+                // to keep multi-generic enums' argument order deterministic.
+                let generic_vars: Vec<(String, Type)> = generics.iter()
+                    .map(|g| (g.clone(), table.fresh_var()))
+                    .collect();
+                let enum_ty = Type::Custom {
+                    name: name.clone(),
+                    args: generic_vars.iter().map(|(_, t)| t.clone()).collect(),
+                };
+
+                let mut variant_defs = Vec::new();
+                for (vname, payload) in variants {
+                    let payload_ty = payload.as_ref().map(|p| {
+                        generic_vars.iter().find(|(g, _)| g == p)
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or_else(|| parse_type_hint(p))
+                    });
+                    match &payload_ty {
+                        Some(pty) => table.define(vname, Type::Fn(vec![pty.clone()], Box::new(enum_ty.clone())), false),
+                        None => table.define(vname, enum_ty.clone(), false),
+                    }
+                    variant_defs.push((vname.clone(), payload_ty));
+                }
+                table.enums.insert(name.clone(), EnumDef { name: name.clone(), variants: variant_defs });
+                table.define(name, enum_ty, false);
             }
             _ => {}
+        }
+    }
+
+    // Second sub-pass: merge `impl` block methods into their target type's
+    // method map. Run as its own pass (not folded into the loop above) so it
+    // doesn't matter whether the `impl` block appears before or after the
+    // struct/class/enum declaration it targets in the source file -- by this
+    // point every class/struct is already registered in `custom_types`, and
+    // an `impl` targeting an enum (which never gets a `custom_types` entry of
+    // its own) defensively creates one so method-call resolution still finds it.
+    for stmt in statements {
+        if let Statement::Impl { target_name, methods, .. } = stmt {
+            let mut method_map = std::collections::HashMap::new();
+            for m in methods {
+                if let Statement::Function { name: m_name, parameters, return_type, .. } = m {
+                    let param_types: Vec<Type> = parameters.iter()
+                        .map(|(_, ty)| parse_type_hint(ty))
+                        .collect();
+                    let ret = parse_type_hint(return_type);
+                    method_map.insert(m_name.clone(), Type::Fn(param_types, Box::new(ret)));
+                }
+            }
+            match table.custom_types.get_mut(target_name) {
+                Some(def) => def.methods.extend(method_map),
+                None => {
+                    table.custom_types.insert(target_name.clone(), StructDef {
+                        name: target_name.clone(),
+                        parent: None,
+                        fields: std::collections::HashMap::new(),
+                        methods: method_map,
+                    });
+                }
+            }
         }
     }
 
@@ -403,17 +488,28 @@ fn resolve_expression<'a>(expr: &Expression<'a>, table: &mut SymbolTable, errors
         Expression::Match { value, arms } => {
             resolve_expression(value, table, errors, line);
             for (pattern, body) in arms {
-                // Ignore pattern resolution for now, or just ignore "_"
-                if let Expression::Identifier(name) = pattern {
-                    if name != "_" {
-                        // Normally pat variables should be declared, but match arms bind them
-                        // For wildcard, we definitely ignore it.
-                        // (Optional: add them to scope if they are binding variables)
+                // A binding pattern (`x`) or a variant payload binding
+                // (`Circle(r)`) introduces a new name scoped to this arm's
+                // body -- define it before resolving the body, or it would
+                // (incorrectly) fail as an undeclared variable. Wildcards and
+                // literal patterns introduce nothing.
+                table.enter_scope();
+                match crate::pattern::classify_pattern(pattern, |n| table.is_nullary_variant(n)) {
+                    crate::pattern::ArmPattern::Binding(name) => {
+                        let fv = table.fresh_var();
+                        table.define(&name, fv, false);
                     }
-                } else {
-                    // For nested patterns, wait until full pattern matching is supported
+                    crate::pattern::ArmPattern::Variant { binding: Some(bname), .. } => {
+                        let fv = table.fresh_var();
+                        table.define(&bname, fv, false);
+                    }
+                    crate::pattern::ArmPattern::Literal(lit) => {
+                        resolve_expression(lit, table, errors, line);
+                    }
+                    _ => {}
                 }
                 resolve_statement(body, table, errors);
+                table.exit_scope();
             }
         }
         Expression::Range { start, end } => {

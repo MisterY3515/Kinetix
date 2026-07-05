@@ -408,28 +408,28 @@ fn lower_expression<'a>(expr: &Expression<'a>, symbols: &SymbolTable, traits: &c
             let val = lower_expression(value, symbols, traits, fresh, env);
             let match_ty = fresh.fresh();
             let hir_arms: Vec<(HirPattern, HirStatement)> = arms.iter().map(|(pat_expr, body_stmt)| {
-                // Determine the pattern from the expression
-                let pattern = match pat_expr {
-                    Expression::Identifier(name) if name == "_" => HirPattern::Wildcard,
-                    Expression::Identifier(name) => HirPattern::Binding(name.clone()),
-                    Expression::Call { function, arguments } => {
-                        // e.g. Some(x) => Variant { name: "Some", binding: Some("x") }
-                        if let Expression::Identifier(vname) = *function {
-                            let binding = arguments.first().and_then(|a| {
-                                if let Expression::Identifier(b) = a { Some(b.clone()) } else { None }
-                            });
-                            HirPattern::Variant { name: vname.clone(), binding }
-                        } else {
-                            HirPattern::Wildcard
-                        }
+                // Each arm gets its own env clone (like a function body) so a
+                // binding name reused across arms (`Circle(r) => .., Square(r) => ..`)
+                // doesn't spuriously share one type variable between them.
+                let mut arm_env = env.clone();
+                let pattern = match crate::pattern::classify_pattern(pat_expr, |n| symbols.is_nullary_variant(n)) {
+                    crate::pattern::ArmPattern::Wildcard => HirPattern::Wildcard,
+                    crate::pattern::ArmPattern::Binding(name) => {
+                        arm_env.insert(name.clone(), fresh.fresh());
+                        HirPattern::Binding(name)
                     }
-                    _ => {
-                        // Literal patterns (integer, string, bool, etc.)
-                        let lit = lower_expression(pat_expr, symbols, traits, fresh, env);
+                    crate::pattern::ArmPattern::Variant { name, binding } => {
+                        if let Some(bname) = &binding {
+                            arm_env.insert(bname.clone(), fresh.fresh());
+                        }
+                        HirPattern::Variant { name, binding }
+                    }
+                    crate::pattern::ArmPattern::Literal(lit_expr) => {
+                        let lit = lower_expression(lit_expr, symbols, traits, fresh, &mut arm_env);
                         HirPattern::Literal(lit)
                     }
                 };
-                let body = lower_statement(body_stmt, symbols, traits, fresh, env);
+                let body = lower_statement(body_stmt, symbols, traits, fresh, &mut arm_env);
                 (pattern, body)
             }).collect();
             HirExpression {

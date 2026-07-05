@@ -1,8 +1,9 @@
-// Phase 2 Type System Test — Kinetix v0.0.6
+// Phase 2 Type System Test — Kinetix v0.0.9
 // Verifica: Enum, Trait, Impl, Match, Option<T>, Result<T,E>, Exhaustiveness
 // NOTE: These constructs are parsed and structurally validated through the
-//       HIR → Type Check → MIR → Borrow Check → Monomorphize → Validate pipeline.
-//       VM bytecode emission for enum/match/trait is Phase 3+ (Build 15+).
+//       HIR → Type Check → MIR → Borrow Check → Monomorphize → Validate pipeline,
+//       AND (since Build 36, 2026-07-06) actually produce executable bytecode
+//       in compiler.rs -- see Gestione/Attività/Completate/2026-07-06_Bytecode_Reale_Enum_Trait_Match.md.
 
 // ──────────────────── 1. Enum Declarations ────────────────────
 
@@ -40,6 +41,15 @@ impl Display for Color {
     }
 }
 
+// impl/trait method dispatch on an enum instance (Build 36 — real bytecode).
+// The `;` after `Red` avoids a pre-existing Holy-Shell parser ambiguity where a
+// bare-identifier `let` immediately followed by another statement on the next
+// line gets parsed as an implicit call (see roadmap.md "Debito Tecnico").
+let sample = Red;
+if sample.show() == "color" {
+    println("Phase 2 impl/trait dispatch: OK")
+}
+
 // ──────────────────── 4. Match Expression ────────────────────
 
 // Match on integer literal
@@ -48,6 +58,29 @@ let label = match x {
     1 => "one",
     42 => "forty-two",
     _ => "other",
+}
+if label == "forty-two" {
+    println("Phase 2 match (literal): OK")
+}
+
+// Match on a payload-carrying enum variant, with binding
+enum Shape {
+    Circle(int),
+    Square(int),
+}
+let shape = Circle(7)
+let shape_desc = match shape {
+    Circle(r) => "circle",
+    Square(side) => "square",
+}
+if shape_desc == "circle" {
+    println("Phase 2 match (variant + binding): OK")
+}
+
+// `if` as an expression (Build 36 — previously always produced `null`)
+let ifval = if x == 42 { "yes" } else { "no" }
+if ifval == "yes" {
+    println("Phase 2 if-as-expression: OK")
 }
 
 // ──────────────────── 5. Basic functionality (VM-executable) ────────────────────
