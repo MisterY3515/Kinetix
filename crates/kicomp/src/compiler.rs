@@ -154,11 +154,13 @@ impl Compiler {
                 let obj_reg = self.compile_expression(object)?;
                 let member_idx = self.current_fn().add_constant(Constant::String(member.clone()));
                 self.emit_instr(Instruction::new(Opcode::SetMember, obj_reg, member_idx, val_reg));
+                self.writeback_global_root(object, obj_reg);
             }
             Expression::Index { left, index } => {
                 let obj_reg = self.compile_expression(left)?;
                 let idx_reg = self.compile_expression(index)?;
                 self.emit_instr(Instruction::new(Opcode::SetIndex, obj_reg, idx_reg, val_reg));
+                self.writeback_global_root(left, obj_reg);
             }
             _ => return Err("Invalid assignment target".into()),
         }
@@ -175,6 +177,24 @@ impl Compiler {
         }
 
         Ok(())
+    }
+
+    /// `SetMember`/`SetIndex` mutate the register holding the container in
+    /// place. For a local, reading it via `Identifier` returns that same
+    /// persistent register (see `resolve_use`), so the mutation is already
+    /// visible. For a *global* (top-level `let`/`mut`), reading it emits a
+    /// `GetGlobal` that copies the value into a fresh temporary -- mutating
+    /// that copy is invisible until it's written back with `SetGlobal`. Only
+    /// handles the case where `root` is a plain identifier; nested containers
+    /// (`a.b.field = x`) are unaffected since they were already unreachable
+    /// (no parser support for member-access assignment targets).
+    fn writeback_global_root(&mut self, root: &Expression<'_>, reg: u16) {
+        if let Expression::Identifier(name) = root {
+            if self.resolve_use(name).ok().flatten().is_none() {
+                let name_idx = self.current_fn().add_constant(Constant::String(name.clone()));
+                self.emit_instr(Instruction::ab(Opcode::SetGlobal, name_idx, reg));
+            }
+        }
     }
 
     // ========== Statements ==========
@@ -580,6 +600,15 @@ impl Compiler {
             }
             Expression::Prefix { operator, right } => {
                 let right_reg = self.compile_expression(right)?;
+                if operator == "&" || operator == "&mut" {
+                    // This VM has no pointer/aliasing value: locals ARE registers and
+                    // calls clone arguments into the callee's frame, so a reference is
+                    // erased to the same register as its operand. `&mut` additionally
+                    // marks the argument, at its call site, for write-back of the
+                    // call's return value (see Expression::Call below) -- the only
+                    // channel by which a callee can appear to mutate it.
+                    return Ok(right_reg);
+                }
                 let result = self.alloc_register();
                 let opcode = match operator.as_str() {
                     "-" => Opcode::Neg,
@@ -727,6 +756,7 @@ impl Compiler {
                 let orig_func_reg = self.compile_expression(function)?;
                 let call_reg = self.alloc_register();
                 self.emit_instr(Instruction::ab(Opcode::SetLocal, call_reg, orig_func_reg));
+                let mut mut_ref_target: Option<&Expression<'_>> = None;
                 for (i, arg) in arguments.iter().enumerate() {
                     let expected_reg = call_reg + 1 + i as u16;
                     let arg_reg = self.compile_expression(arg)?;
@@ -736,8 +766,29 @@ impl Compiler {
                         }
                         self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_reg, arg_reg));
                     }
+                    if let Expression::Prefix { operator, right } = arg {
+                        if operator == "&mut" {
+                            if !matches!(**right, Expression::Identifier(_) | Expression::MemberAccess { .. } | Expression::Index { .. }) {
+                                return Err("'&mut' requires a mutable place (a variable, field, or index expression)".to_string());
+                            }
+                            if mut_ref_target.is_some() {
+                                return Err("at most one '&mut' argument is supported per call (the callee has a single return value to write back)".to_string());
+                            }
+                            mut_ref_target = Some(right);
+                        }
+                    }
                 }
                 self.emit_instr(Instruction::ab(Opcode::Call, call_reg, arguments.len() as u16));
+
+                // `&mut x` at a call site is sugar for `x = f(...)`: this VM clones
+                // arguments into the callee's frame (no aliasing), so the only way a
+                // function can appear to mutate a by-reference argument is by
+                // returning its new value, which is written back into the argument's
+                // place here.
+                if let Some(target) = mut_ref_target {
+                    self.emit_assign_to_target(target, call_reg)?;
+                }
+
                 Ok(call_reg)
             }
             Expression::If { condition, consequence, alternative } => {

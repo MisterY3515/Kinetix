@@ -312,6 +312,12 @@ impl TypeContext {
             (Type::Ref(a), Type::Ref(b)) => self.unify(a, b),
             (Type::MutRef(a), Type::MutRef(b)) => self.unify(a, b),
 
+            // Auto-deref coercion: `&`/`&mut` are call-site-only annotations in this
+            // language (there is no declarable reference parameter type), so a
+            // reference argument must unify against the plain pointee type declared
+            // on the other side -- e.g. `f(&mut x)` against `fn f(n: int)`.
+            (Type::Ref(a), b) | (Type::MutRef(a), b) => self.unify(a, b),
+            (a, Type::Ref(b)) | (a, Type::MutRef(b)) => self.unify(a, b),
 
             // Custom types (named + generic args)
             (Type::Custom { name: n1, args: a1 }, Type::Custom { name: n2, args: a2 }) if n1 == n2 && a1.len() == a2.len() => {
