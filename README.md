@@ -218,8 +218,22 @@ The shell has real line-editing (history with the arrow keys, Ctrl+C to cancel t
 If you want to build the compiler, the virtual machine, or the single-file installer from source, follow these steps:
 
 ### Prerequisites
+
+Run the setup script for your platform to install everything below in one go (safe to re-run):
+```bash
+# Windows
+scripts\install_prerequisites.bat
+# macOS / Linux
+./scripts/install_prerequisites.sh
+```
+
+Or set them up manually:
 1. **[Rust Toolchain](https://rustup.rs/)**: Install the latest stable version of Rust and Cargo.
-2. **LLVM 21 (Optional but Recommended)**: Required to build the native LLVM backend features (`kivm compile --native`).
+2. **A C++ linker/toolchain** (needed to build the GUI installer crate, not the CLI/compiler alone):
+   - *Windows*: MSVC Build Tools -- "Desktop development with C++" workload, plus the "MSVC v143 - VS 2022 C++ ARM64 build tools" component if you also need the arm64 target.
+   - *Linux*: `pkg-config`, `libasound2-dev`, `libgtk-3-dev`, `libxcb1-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev` (or your distro's equivalents).
+   - *macOS*: Xcode Command Line Tools (`xcode-select --install`).
+3. **LLVM 21 (Optional but Recommended)**: Required to build the native LLVM backend features (`kivm compile --native`).
    - *Windows*: Download and install pre-built LLVM 21 binaries or compile LLVM from source. Ensure `LLVM_SYS_210_PREFIX` points to your LLVM installation directory.
    - *Linux*: Install `llvm-21-dev` and `libpolly-21-dev` via your package manager.
 
