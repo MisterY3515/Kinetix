@@ -237,13 +237,13 @@ cargo build --release --features llvm
 
 ### Building the Kinetix Installer (All-In-One)
 
-The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. Each platform has a dedicated script that produces a consistently-named artifact (`KinetixInstaller-<os>-<arch>[.ext]`), ready to attach to a GitHub Release:
+The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. Each platform has a dedicated script that produces a consistently-named artifact (`KinetixInstaller-<os>-<arch>[.ext]`), ready to attach to a GitHub Release. Windows and Linux default to building only your machine's own architecture (each arch is a full, uncached compile, so building both takes about twice as long) — pass `both` when you actually need both release artifacts:
 
 | Platform | Script | Output |
 |----------|--------|--------|
-| Windows | `powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1` | `KinetixInstaller-windows-x86_64.exe`, `KinetixInstaller-windows-arm64.exe` |
-| Linux | `./scripts/build_linux.sh` (needs [Docker](https://www.docker.com/) — cross-builds both architectures via containers, no local cross-toolchain needed) | `KinetixInstaller-linux-x86_64`, `KinetixInstaller-linux-aarch64` |
-| macOS | `./scripts/build_macos.sh` (run natively on either Intel or Apple Silicon) | `KinetixInstaller-macos-universal.pkg` (one Universal binary, runs on both) |
+| Windows | `powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1 [-Arch x64\|arm64\|both]` | `KinetixInstaller-windows-x86_64.exe`, `KinetixInstaller-windows-arm64.exe` |
+| Linux | `./scripts/build_linux.sh [x86_64\|aarch64\|both]` (needs [Docker](https://www.docker.com/) — cross-builds via containers, no local cross-toolchain needed) | `KinetixInstaller-linux-x86_64`, `KinetixInstaller-linux-aarch64` |
+| macOS | `./scripts/build_macos.sh` (run natively on either Intel or Apple Silicon — always builds both and merges them into one Universal binary, so there's no per-arch cost to skip) | `KinetixInstaller-macos-universal.pkg` (one Universal binary, runs on both) |
 
 If you prefer to build it manually instead:
 1. First, compile the release binaries: `cargo build --release -p kinetix-cli -p kinetix-kicomp`

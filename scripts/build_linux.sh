@@ -1,12 +1,34 @@
 #!/bin/bash
-# Build script for Linux. Builds two separate installer binaries (x86_64 and
-# arm64) using Docker, so this works from any host (including non-Linux
-# hosts, and Apple Silicon/Intel Macs) without a local cross-toolchain.
-# ELF has no "universal binary" equivalent, so -- unlike build_macos.sh --
-# this produces one binary per architecture, not a merged one.
+# Build script for Linux. Builds installer binaries using Docker, so this
+# works from any host (including non-Linux hosts, and Apple Silicon/Intel
+# Macs) without a local cross-toolchain. ELF has no "universal binary"
+# equivalent, so -- unlike build_macos.sh -- this produces one binary per
+# architecture, not a merged one.
+#
+# By default this only builds for the host's own architecture (each arch is
+# a full from-scratch compile inside its own container, with no cache --
+# building both takes roughly twice as long). Pass "both" to produce both
+# release artifacts.
+#
+# Usage:
+#   ./scripts/build_linux.sh            # host's own architecture (fast, default)
+#   ./scripts/build_linux.sh x86_64      # x86_64 only
+#   ./scripts/build_linux.sh aarch64     # aarch64 only
+#   ./scripts/build_linux.sh both        # both (release prep)
 set -e
 
 KINETIX_BUILD="36"
+
+case "$(uname -m)" in
+    x86_64|amd64) HOST_ARCH="x86_64" ;;
+    arm64|aarch64) HOST_ARCH="aarch64" ;;
+    *) HOST_ARCH="x86_64" ;;
+esac
+ARCH="${1:-$HOST_ARCH}"
+if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" && "$ARCH" != "both" ]]; then
+    echo "Error: unknown arch '$ARCH' (expected x86_64, aarch64, or both)"
+    exit 1
+fi
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."
@@ -34,10 +56,18 @@ APT_PACKAGES="pkg-config libasound2-dev libgtk-3-dev libxcb1-dev libxkbcommon-de
 # array support). Each arch gets its own target dir: reusing one across
 # container archs risks cargo reusing a fingerprint-cached artifact built
 # for the *other* architecture.
-PLATFORMS=("linux/amd64" "linux/arm64")
-LABELS=("x86_64" "aarch64")
+ALL_PLATFORMS=("linux/amd64" "linux/arm64")
+ALL_LABELS=("x86_64" "aarch64")
+PLATFORMS=()
+LABELS=()
+for i in "${!ALL_LABELS[@]}"; do
+    if [[ "$ARCH" == "both" || "$ARCH" == "${ALL_LABELS[$i]}" ]]; then
+        PLATFORMS+=("${ALL_PLATFORMS[$i]}")
+        LABELS+=("${ALL_LABELS[$i]}")
+    fi
+done
 
-echo "=== Building Kinetix for Linux (x86_64 + arm64, via Docker) ==="
+echo "=== Building Kinetix for Linux ($ARCH, via Docker) ==="
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"

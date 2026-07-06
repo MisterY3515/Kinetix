@@ -3,11 +3,39 @@
 # Produces one installer.exe per architecture (x86_64 and arm64) -- unlike
 # macOS's Mach-O, a Windows PE binary can't be merged into one "universal" file.
 #
+# By default this only builds for the architecture you're running on --
+# use -Arch both when you actually need to produce both release artifacts.
 # Building the arm64 installer requires the "ARM64 build tools" component
 # for MSVC (Visual Studio Installer -> Individual Components -> MSVC v143 -
 # VS 2022 C++ ARM64 build tools) in addition to the default x86_64 toolchain.
+#
+# Usage:
+#   .\scripts\build_installer.ps1                # host's own architecture (fast, default)
+#   .\scripts\build_installer.ps1 -Arch x64       # x86_64 only
+#   .\scripts\build_installer.ps1 -Arch arm64     # arm64 only
+#   .\scripts\build_installer.ps1 -Arch both      # both (release prep)
 
-Write-Host "=== Building Kinetix Installer (x86_64 + arm64) ===" -ForegroundColor Cyan
+param(
+    [ValidateSet("x64", "arm64", "both")]
+    [string]$Arch = $(if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" })
+)
+
+# Safety net: PowerShell cmdlet errors (a missing file for Copy-Item, a
+# locked .exe, etc.) are non-terminating by default -- the script would
+# otherwise print a red error and silently carry on to the next step
+# instead of stopping, which is indistinguishable from "it crashed with no
+# message" once the real failure has scrolled off screen. $ErrorActionPreference
+# makes every such error terminating so the trap below always catches it.
+$ErrorActionPreference = "Stop"
+
+trap {
+    Write-Host "`nFATAL ERROR: $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "=== Building Kinetix Installer ($Arch) ===" -ForegroundColor Cyan
 
 # Resolve workspace root (parent of scripts/)
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -15,9 +43,20 @@ $root = Split-Path -Parent $scriptDir
 
 $env:KINETIX_BUILD = "36"
 
-$targets = @{
+# Filename labels stay "x86_64"/"arm64" (matching the KinetixInstaller-<os>-<arch>
+# convention used for all platforms), independent of the shorter "x64" the
+# -Arch parameter accepts for convenience.
+$allTargets = [ordered]@{
     "x86_64-pc-windows-msvc" = "x86_64"
     "aarch64-pc-windows-msvc" = "arm64"
+}
+$wantedLabel = @{ "x64" = "x86_64"; "arm64" = "arm64" }[$Arch]
+$targets = [ordered]@{}
+foreach ($t in $allTargets.Keys) {
+    $label = $allTargets[$t]
+    if ($Arch -eq "both" -or $label -eq $wantedLabel) {
+        $targets[$t] = $label
+    }
 }
 
 $dist = Join-Path $root "dist"

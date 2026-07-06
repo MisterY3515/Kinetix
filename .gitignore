@@ -1,6 +1,5 @@
 /target
 *.log
-/crates/installer/target_installer
 # Per-arch target dirs used by build_linux.sh's Docker cross-compile (normally
 # removed by the script itself, but left behind if it's interrupted)
 /target-docker-*
