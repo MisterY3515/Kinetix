@@ -3,8 +3,8 @@
 # Produces one installer.exe per architecture (x86_64 and arm64) -- unlike
 # macOS's Mach-O, a Windows PE binary can't be merged into one "universal" file.
 #
-# By default this only builds for the architecture you're running on --
-# use -Arch both when you actually need to produce both release artifacts.
+# Builds both architectures by default -- pass -Arch x64/arm64 to build only
+# one (e.g. for a quick local test after a prerequisite-install rerun).
 # Building the arm64 installer requires the "ARM64 build tools" component
 # for MSVC (Visual Studio Installer -> Individual Components -> MSVC v143 -
 # VS 2022 C++ ARM64 build tools) *and* Clang/LLVM (the `ring` crate needs
@@ -12,14 +12,13 @@
 # compiler can't). scripts\install_prerequisites.bat installs both.
 #
 # Usage:
-#   .\scripts\build_installer.ps1                # host's own architecture (fast, default)
+#   .\scripts\build_installer.ps1                # both x86_64 and arm64 (default)
 #   .\scripts\build_installer.ps1 -Arch x64       # x86_64 only
 #   .\scripts\build_installer.ps1 -Arch arm64     # arm64 only
-#   .\scripts\build_installer.ps1 -Arch both      # both (release prep)
 
 param(
     [ValidateSet("x64", "arm64", "both")]
-    [string]$Arch = $(if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" })
+    [string]$Arch = "both"
 )
 
 # Safety net: PowerShell cmdlet errors (a missing file for Copy-Item, a

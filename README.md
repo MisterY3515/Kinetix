@@ -252,7 +252,7 @@ cargo build --release --features llvm
 
 ### Building the Kinetix Installer (All-In-One)
 
-The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. Each platform has a dedicated script that produces a consistently-named artifact (`KinetixInstaller-<os>-<arch>[.ext]`), ready to attach to a GitHub Release. Windows and Linux default to building only your machine's own architecture (each arch is a full, uncached compile, so building both takes about twice as long) — pass `both` when you actually need both release artifacts:
+The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. Each platform has a dedicated script that produces a consistently-named artifact (`KinetixInstaller-<os>-<arch>[.ext]`), ready to attach to a GitHub Release. Windows and Linux build both architectures by default — pass a specific arch (each is a full, uncached compile) when you only need one, e.g. for a quick local test:
 
 | Platform | Script | Output |
 |----------|--------|--------|
