@@ -2,7 +2,7 @@
 
 **Kinetix** is an experimental compiled and interpreted programming language built in Rust, created by [MisterY3515](https://github.com/MisterY3515) as a student project (with AI assistance).
 
-Kinetix source files (`.kix`) can be **interpreted directly** via `kivm exec`, making it quick to prototype and test scripts without a separate compilation step. It can also be **compiled** to register-based bytecode (`.exki`, cross-platform) or **native machine code** (via LLVM) for maximum performance. It supports Windows (Mainly tested), Linux, and macOS on **x86_64**, **ARM64**, and **Apple Silicon** architectures.
+Kinetix source files (`.kix`) can be **interpreted directly** via `kivm exec`, making it quick to prototype and test scripts without a separate compilation step. It can also be **compiled** to register-based bytecode (`.exki`, cross-platform) or **native machine code** (via LLVM) for maximum performance. Prebuilt installers are available for Windows, Linux, and macOS, covering both **x86_64** and **ARM64** (Apple Silicon included).
 
 > ⚠️ **Development Status:** Kinetix is under active development. Some functions listed in the documentation or standard library may be **incomplete**, **not fully functional**, or **not yet implemented**. APIs and behavior may change between builds.
 
@@ -163,7 +163,7 @@ println(term.bold("important") + " and " + term.italic("elegant"))
 
 ```bash
 $ kivm shell
-Kinetix Shell v0.0.5 build 10
+Kinetix Shell v0.0.9 (36)
 
 ~ ❯ println(2 + 2)
 4
@@ -171,6 +171,8 @@ Kinetix Shell v0.0.5 build 10
 ~ ❯ cd projects
 ~/projects ❯ exit
 ```
+
+The shell has real line-editing (history with the arrow keys, Ctrl+C to cancel the current line without killing the shell, Ctrl+X/Ctrl+Y to cut/paste, Ctrl+Z to undo), not just raw stdin.
 
 ## Built-in Libraries
 
@@ -235,29 +237,29 @@ cargo build --release --features llvm
 
 ### Building the Kinetix Installer (All-In-One)
 
-The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. 
-**Windows Users**: You can use the provided PowerShell script which automates the entire process, including cleaning caches to avoid file-lock errors.
+The Kinetix project includes a custom cross-platform installer that embeds the compiled binaries. Each platform has a dedicated script that produces a consistently-named artifact (`KinetixInstaller-<os>-<arch>[.ext]`), ready to attach to a GitHub Release:
 
-```bash
-# On Windows, simply run:
-powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
-```
+| Platform | Script | Output |
+|----------|--------|--------|
+| Windows | `powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1` | `KinetixInstaller-windows-x86_64.exe`, `KinetixInstaller-windows-arm64.exe` |
+| Linux | `./scripts/build_linux.sh` (needs [Docker](https://www.docker.com/) — cross-builds both architectures via containers, no local cross-toolchain needed) | `KinetixInstaller-linux-x86_64`, `KinetixInstaller-linux-aarch64` |
+| macOS | `./scripts/build_macos.sh` (run natively on either Intel or Apple Silicon) | `KinetixInstaller-macos-universal.pkg` (one Universal binary, runs on both) |
 
-If you prefer to build it manually:
+If you prefer to build it manually instead:
 1. First, compile the release binaries: `cargo build --release -p kinetix-cli -p kinetix-kicomp`
-2. Then, build the installer: `cd crates/installer && cargo build --release`
-3. The final `installer.exe` will be located in the `crates/installer/target/release/` folder.
+2. Then, build the installer: `cargo build --release -p kinetix-installer`
+3. The final `installer` (or `installer.exe` on Windows) binary will be located in `target/release/` at the workspace root — the installer crate is a normal workspace member, it doesn't get its own separate `target/` directory.
 
-## Benchmarks (v0.0.5 Build 10)
+## Benchmarks (v0.0.9 Build 36)
 
 Parser speed tested on a synthetic source of **3,650 lines** (~70 KB) containing variables, functions, classes, loops, expressions, and arrays.
 
 | Metric | Result |
 |--------|--------|
-| Average parse time | **6.33 ms** |
-| Throughput | **~576,000 lines/sec** |
-| Throughput | **~10.8 MB/sec** |
-| Statements parsed | 2,350 |
+| Average parse time | **2.77 ms** |
+| Throughput | **~1,317,000 lines/sec** |
+| Throughput | **~24.6 MB/sec** |
+| Statements parsed | 2,050 |
 
 Run the benchmark yourself:
 
