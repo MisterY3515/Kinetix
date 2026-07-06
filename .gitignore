@@ -1,9 +1,28 @@
 /target
 *.log
 /crates/installer/target_installer
+# Per-arch target dirs used by build_linux.sh's Docker cross-compile (normally
+# removed by the script itself, but left behind if it's interrupted)
+/target-docker-*
 
 # macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# Local secrets / environment overrides
+.env
+.env.*
 
 # Build/dist output
 /dist

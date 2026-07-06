@@ -68,6 +68,6 @@ done
 echo ""
 echo "=== Done ==="
 echo "Output: $OUTPUT_DIR/"
-for label in "${ARCHES[@]}"; do
+for label in "${LABELS[@]}"; do
     echo "  KinetixInstaller-linux-$label"
 done

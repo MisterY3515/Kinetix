@@ -1012,12 +1012,25 @@ fn preprocess_includes(source: &str, base_path: &Path) -> Result<String, String>
 /// Interactive Kinetix Shell — a terminal REPL with bash-like commands + Kinetix expressions.
 fn run_shell() {
     use kinetix_kicomp::compiler::Compiler;
+    use rustyline::error::ReadlineError;
+    use rustyline::{Cmd, DefaultEditor, EventHandler, KeyEvent, Movement};
 
     let build = option_env!("KINETIX_BUILD").unwrap_or("Dev");
     println!("\x1b[1;35mKinetix Shell\x1b[0m v{} ({})", env!("CARGO_PKG_VERSION"), build);
     println!("Type \x1b[36mexit\x1b[0m to quit, \x1b[36mhelp\x1b[0m for commands.\n");
 
-    let mut line_buf = String::new();
+    let mut rl = DefaultEditor::new().expect("Failed to initialize shell line editor");
+    // Ctrl+X: cut the whole line (paste it back with Ctrl+Y, already bound by default).
+    // Ctrl+Z: undo the last edit. Neither is bound by rustyline's default emacs keymap
+    // (plain Ctrl+X is normally an unused prefix key; Ctrl+Z is left to job-control, which
+    // doesn't apply here since we're mid-line-edit), so this doesn't remove any existing
+    // behavior. Ctrl+V is left alone: it already pastes real OS clipboard content when the
+    // terminal itself intercepts it (Cmd+V on macOS, Ctrl+Shift+V on Linux terminals, both
+    // delivered here via bracketed paste), and on Unix specifically it's also the standard
+    // quoted-insert key -- rustyline has no working non-Windows clipboard backend to bind
+    // the raw Ctrl+V keypress to instead.
+    rl.bind_sequence(KeyEvent::ctrl('X'), EventHandler::Simple(Cmd::Kill(Movement::WholeLine)));
+    rl.bind_sequence(KeyEvent::ctrl('Z'), EventHandler::Simple(Cmd::Undo(1)));
 
     loop {
         // Prompt: show current dir
@@ -1034,16 +1047,23 @@ fn run_shell() {
             })
             .unwrap_or_else(|_| "?".into());
 
-        print!("\x1b[1;34m{}\x1b[0m \x1b[1;33m❯\x1b[0m ", cwd);
-        std::io::stdout().flush().ok();
+        let prompt = format!("\x1b[1;34m{}\x1b[0m \x1b[1;33m❯\x1b[0m ", cwd);
+        let line = match rl.readline(&prompt) {
+            Ok(line) => line,
+            // Ctrl+C: cancel the current line and show a fresh prompt, like a normal shell --
+            // don't kill the whole session.
+            Err(ReadlineError::Interrupted) => continue,
+            // Ctrl+D on an empty line: exit, like a normal shell.
+            Err(ReadlineError::Eof) => {
+                println!("Bye!");
+                break;
+            }
+            Err(_) => break,
+        };
 
-        line_buf.clear();
-        if std::io::stdin().read_line(&mut line_buf).is_err() {
-            break;
-        }
-
-        let input = line_buf.trim();
+        let input = line.trim();
         if input.is_empty() { continue; }
+        rl.add_history_entry(input).ok();
 
         // Exit
         if input == "exit" || input == "quit" {

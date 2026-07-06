@@ -100,68 +100,72 @@ if [ -f assets/logo/KiFile.png ] && command -v iconutil &> /dev/null && command 
     ICNS_FILE="$OUTPUT_DIR/KiFile.icns"
 fi
 
-# Create the handler .app bundle (for file associations)
+# Create the handler .app bundle (for file associations).
+#
+# Built via `osacompile` (a compiled AppleScript applet), NOT a plain bash
+# executable. macOS delivers file-open events (double-click, "Open With") as
+# Apple Events (kAEOpenDocuments) -- only a bundle with a real Apple Event
+# handler receives these. A bash script set as CFBundleExecutable never gets
+# the file path this way (verified: invoking it directly with an argv file
+# path does not trigger it either -- Apple Events are LaunchServices-mediated,
+# not argv-based), so double-clicking a .kix/.exki always launched with an
+# empty argv and fell through to the "no file -> open a bare shell" branch
+# instead of running the file. osacompile produces a proper applet whose
+# `on open` handler does receive the Apple Event with the real file path.
 APP_DIR="$STAGING/Applications/Kinetix.app"
-mkdir -p "$APP_DIR/Contents/MacOS"
-mkdir -p "$APP_DIR/Contents/Resources"
+APPLESCRIPT_SRC="$OUTPUT_DIR/KinetixEnv.applescript"
+cat > "$APPLESCRIPT_SRC" <<'APPLESCRIPT'
+on open theFiles
+    repeat with aFile in theFiles
+        set posixPath to POSIX path of aFile
+        tell application "Terminal"
+            activate
+            do script "/usr/local/bin/kivm exec " & quoted form of posixPath
+        end tell
+    end repeat
+end open
 
-# Launcher script. Runs in Terminal.app: a bundle launched from Finder has
-# no TTY attached, so exec'ing kivm directly produces a process with no
-# visible window and no way to read stdin.
-cat > "$APP_DIR/Contents/MacOS/KinetixEnv" <<'LAUNCHER'
-#!/bin/bash
-if [ -n "$1" ]; then
-  ESCAPED_PATH=$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')
-  osascript -e "tell application \"Terminal\" to do script \"/usr/local/bin/kivm exec \\\"$ESCAPED_PATH\\\"\""
-else
-  osascript -e 'tell application "Terminal" to do script "/usr/local/bin/kivm shell"'
-fi
-LAUNCHER
-chmod +x "$APP_DIR/Contents/MacOS/KinetixEnv"
+on run
+    tell application "Terminal"
+        activate
+        do script "/usr/local/bin/kivm shell"
+    end tell
+end run
+APPLESCRIPT
 
-# Copy icon
+rm -rf "$APP_DIR"
+mkdir -p "$STAGING/Applications"
+osacompile -o "$APP_DIR" "$APPLESCRIPT_SRC"
+
+# Copy icon and point the bundle at it (osacompile ships its own default
+# "droplet" icon via both a legacy .icns and a modern Assets.car catalog --
+# drop both so nothing stale is left behind).
 if [ -n "$ICNS_FILE" ]; then
+    rm -f "$APP_DIR/Contents/Resources/droplet.icns" "$APP_DIR/Contents/Resources/Assets.car"
     cp "$ICNS_FILE" "$APP_DIR/Contents/Resources/KiFile.icns"
 fi
 
-# Info.plist with file associations
-cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>KinetixEnv</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.mistery3515.kinetix</string>
-    <key>CFBundleName</key>
-    <string>Kinetix</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleIconFile</key>
-    <string>KiFile</string>
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeExtensions</key>
-            <array>
-                <string>kix</string>
-                <string>ki</string>
-                <string>exki</string>
-            </array>
-            <key>CFBundleTypeIconFile</key>
-            <string>KiFile</string>
-            <key>CFBundleTypeName</key>
-            <string>Kinetix Source File</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSHandlerRank</key>
-            <string>Owner</string>
-        </dict>
-    </array>
-</dict>
-</plist>
-PLIST
+# Patch in our custom Info.plist keys. osacompile's own required keys
+# (CFBundleExecutable, NSAppleScriptEnabled, the Apple Events usage
+# description, etc.) are left untouched.
+INFO_PLIST="$APP_DIR/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $IDENTIFIER" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleName Kinetix" "$INFO_PLIST"
+if [ -n "$ICNS_FILE" ]; then
+    /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$INFO_PLIST"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile KiFile" "$INFO_PLIST"
+fi
+/usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes array" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0 dict" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions array" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0 string kix" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:1 string ki" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeExtensions:2 string exki" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeIconFile string KiFile" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDocumentTypes:0:CFBundleTypeName string "Kinetix Source File"' "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string Owner" "$INFO_PLIST"
 
 # Post-install script: refresh LaunchServices for file associations
 cat > "$SCRIPTS/postinstall" <<'POSTINSTALL'
