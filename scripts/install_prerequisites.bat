@@ -20,7 +20,12 @@ goto :check_msvc
 
 :install_rust
 echo Installing Rust via winget...
-winget install --id Rustlang.Rustup -e --accept-source-agreements --accept-package-agreements
+rem --source winget pins the lookup to the winget community repo and skips
+rem the Microsoft Store source entirely -- on some networks (corporate
+rem proxies/TLS inspection) msstore fails to search at all, which makes
+rem winget report an ambiguous match instead of actually installing anything
+rem (and, worse, still exits 0 when that happens).
+winget install --id Rustlang.Rustup -e --source winget --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto :rust_failed
 echo.
 echo IMPORTANT: close and reopen this terminal so PATH picks up cargo/rustc,
@@ -45,7 +50,7 @@ goto :add_targets
 :install_msvc
 echo Installing Visual Studio Build Tools (C++ workload + ARM64 tools) via winget.
 echo This downloads several GB and can take a while -- please wait, do not close this window.
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements --accept-package-agreements --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended"
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --accept-source-agreements --accept-package-agreements --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended"
 if errorlevel 1 goto :msvc_failed
 echo.
 echo IMPORTANT: close and reopen this terminal (or restart) so the build tools
