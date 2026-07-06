@@ -1,11 +1,13 @@
 #!/bin/bash
-# Build script for macOS (.pkg Installer)
+# Build script for macOS (.pkg Installer) -- produces a single Universal
+# (x86_64 + arm64) binary via lipo, so one download runs natively on both
+# Intel and Apple Silicon Macs.
 set -e
 
 # Load cargo into PATH if installed via rustup
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
-export KINETIX_BUILD="35"
+export KINETIX_BUILD="36"
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."
@@ -15,28 +17,64 @@ IDENTIFIER="com.mistery3515.kinetix"
 OUTPUT_DIR="dist_mac"
 STAGING="$OUTPUT_DIR/staging"
 SCRIPTS="$OUTPUT_DIR/scripts"
+UNIVERSAL="$OUTPUT_DIR/universal"
 
-echo "=== Building Kinetix for macOS (v$VERSION) ==="
+TARGETS=("aarch64-apple-darwin" "x86_64-apple-darwin")
 
-# 1. Build release binaries
-echo "[1/5] Compiling..."
-cargo build --release --package kinetix-cli --package kinetix-kicomp
+echo "=== Building Kinetix for macOS (v$VERSION, Universal) ==="
 
-# 2. Build the GUI Installer (self-contained with embedded binaries)
-echo "[2/5] Building GUI Installer..."
-cargo build --release --package kinetix-installer
-
-# 3. Stage the payload for pkgbuild
-echo "[3/5] Staging payload..."
 rm -rf "$OUTPUT_DIR"
-mkdir -p "$STAGING/usr/local/bin"
-mkdir -p "$STAGING/usr/local/share/kinetix/assets"
-mkdir -p "$SCRIPTS"
+mkdir -p "$UNIVERSAL" "$STAGING/usr/local/bin" "$STAGING/usr/local/share/kinetix/assets" "$SCRIPTS"
 
-# Copy main binaries
-cp target/release/kivm "$STAGING/usr/local/bin/kivm"
-cp target/release/kicomp "$STAGING/usr/local/bin/kicomp"
-cp target/release/installer "$STAGING/usr/local/bin/KinetixInstaller"
+# 1. Ensure both target toolchains are installed (no-op if already present).
+echo "[1/7] Ensuring cross-compilation targets..."
+for target in "${TARGETS[@]}"; do
+    rustup target add "$target" > /dev/null
+done
+
+# 2. Build kivm/kicomp for each architecture natively (macOS's own linker
+#    cross-links both Apple Silicon and Intel targets without Docker/extra SDKs).
+echo "[2/7] Compiling kivm/kicomp for ${TARGETS[*]}..."
+for target in "${TARGETS[@]}"; do
+    cargo build --release --target "$target" --package kinetix-cli --package kinetix-kicomp
+done
+
+# 3. Merge each binary into a Universal (fat) binary with lipo, then stage
+#    the merged binaries at target/release/ -- the installer crate's
+#    include_bytes! paths are hardcoded to target/release/{kivm,kicomp}
+#    (not target-triple-aware), so the installer must see the Universal
+#    binaries there *before* it is built, or it will silently embed
+#    whichever single-arch binary happened to be built last.
+echo "[3/7] Merging into Universal binaries (lipo)..."
+for bin in kivm kicomp; do
+    lipo -create -output "$UNIVERSAL/$bin" \
+        "target/${TARGETS[0]}/release/$bin" \
+        "target/${TARGETS[1]}/release/$bin"
+    lipo -info "$UNIVERSAL/$bin"
+done
+mkdir -p target/release
+cp "$UNIVERSAL/kivm" target/release/kivm
+cp "$UNIVERSAL/kicomp" target/release/kicomp
+
+# 4. Build the GUI Installer for each architecture (embeds the Universal
+#    kivm/kicomp bytes staged above), then merge the installer itself into
+#    a Universal binary too, so the installer app runs natively everywhere.
+echo "[4/7] Building GUI Installer for ${TARGETS[*]}..."
+for target in "${TARGETS[@]}"; do
+    cargo build --release --target "$target" --package kinetix-installer
+done
+lipo -create -output "$UNIVERSAL/installer" \
+    "target/${TARGETS[0]}/release/installer" \
+    "target/${TARGETS[1]}/release/installer"
+lipo -info "$UNIVERSAL/installer"
+
+# 5. Stage the payload for pkgbuild
+echo "[5/7] Staging payload..."
+
+# Copy main binaries (all Universal)
+cp "$UNIVERSAL/kivm" "$STAGING/usr/local/bin/kivm"
+cp "$UNIVERSAL/kicomp" "$STAGING/usr/local/bin/kicomp"
+cp "$UNIVERSAL/installer" "$STAGING/usr/local/bin/KinetixInstaller"
 chmod +x "$STAGING/usr/local/bin/kivm"
 chmod +x "$STAGING/usr/local/bin/kicomp"
 chmod +x "$STAGING/usr/local/bin/KinetixInstaller"
@@ -134,11 +172,11 @@ echo "Kinetix installation complete."
 POSTINSTALL
 chmod +x "$SCRIPTS/postinstall"
 
-# 4. Ad-hoc code sign (no Apple Developer ID configured yet).
+# 6. Ad-hoc code sign (no Apple Developer ID configured yet).
 # This stops "no usable signature" warnings but does NOT satisfy Gatekeeper
 # for apps downloaded over the internet (quarantine flag) on other Macs --
 # that requires a paid Developer ID cert plus notarization via `notarytool`.
-echo "[4/5] Ad-hoc signing..."
+echo "[6/7] Ad-hoc signing..."
 if command -v codesign &> /dev/null; then
     codesign --force --sign - "$APP_DIR"
     codesign --force --sign - "$STAGING/usr/local/bin/kivm"
@@ -146,23 +184,27 @@ if command -v codesign &> /dev/null; then
     codesign --force --sign - "$STAGING/usr/local/bin/KinetixInstaller"
 fi
 
-# 5. Build .pkg
-echo "[5/5] Creating .pkg..."
+# 7. Build .pkg
+# Named consistently with the Windows/Linux artifacts (KinetixInstaller-<os>-<arch>)
+# so a GitHub Release upload is unambiguous and scriptable -- "universal" here
+# since one file runs natively on both Intel and Apple Silicon.
+echo "[7/7] Creating .pkg..."
+PKG_NAME="KinetixInstaller-macos-universal.pkg"
 if command -v pkgbuild &> /dev/null; then
     pkgbuild --root "$STAGING" \
              --identifier "$IDENTIFIER" \
              --version "$VERSION" \
              --scripts "$SCRIPTS" \
              --install-location "/" \
-             "$OUTPUT_DIR/KinetixInstaller.pkg"
-    
+             "$OUTPUT_DIR/$PKG_NAME"
+
     echo "=== Done ==="
-    echo "Output: $OUTPUT_DIR/KinetixInstaller.pkg"
+    echo "Output: $OUTPUT_DIR/$PKG_NAME (Universal: ${TARGETS[*]})"
 else
     echo "Warning: pkgbuild not found (requires Xcode Command Line Tools)."
     echo "Falling back to standalone binary..."
-    cp target/release/installer "$OUTPUT_DIR/KinetixInstaller"
-    chmod +x "$OUTPUT_DIR/KinetixInstaller"
+    cp "$UNIVERSAL/installer" "$OUTPUT_DIR/KinetixInstaller-macos-universal"
+    chmod +x "$OUTPUT_DIR/KinetixInstaller-macos-universal"
     echo "=== Done ==="
-    echo "Output: $OUTPUT_DIR/KinetixInstaller"
+    echo "Output: $OUTPUT_DIR/KinetixInstaller-macos-universal (Universal: ${TARGETS[*]})"
 fi

@@ -8,6 +8,7 @@
 # Build/dist output
 /dist
 /dist_mac
+/dist_linux
 /KinetixInstaller.exe
 
 # Transient debug/diagnostic dumps

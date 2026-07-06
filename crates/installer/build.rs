@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=KINETIX_BUILD");
+
     #[cfg(windows)]
     {
         let mut res = winres::WindowsResource::new();

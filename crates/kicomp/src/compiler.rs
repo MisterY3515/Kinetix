@@ -4,8 +4,25 @@ use kinetix_language::ast::{Statement, Expression};
 use crate::ir::*;
 use std::collections::HashMap;
 
-/// Current build version of the compiler/VM.
-pub const CURRENT_BUILD: i64 = 35;
+/// Current build version of the compiler/VM. Reads the same KINETIX_BUILD
+/// env var the build scripts set (falls back to 36 for plain `cargo build`
+/// invocations that don't set it) -- previously this was a second, separate
+/// hardcoded number that silently drifted out of sync with KINETIX_BUILD.
+pub const CURRENT_BUILD: i64 = match option_env!("KINETIX_BUILD") {
+    Some(s) => parse_build_number(s),
+    None => 36,
+};
+
+const fn parse_build_number(s: &str) -> i64 {
+    let bytes = s.as_bytes();
+    let mut result: i64 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        result = result * 10 + (bytes[i] - b'0') as i64;
+        i += 1;
+    }
+    result
+}
 
 #[derive(Debug, Clone, Copy)]
 struct LocalInfo {
