@@ -37,6 +37,16 @@ trap {
     exit 1
 }
 
+# winget-installed tools (rustup, MSVC Build Tools, LLVM/clang-cl) only
+# update the registry-level PATH -- an already-open PowerShell session keeps
+# its own stale copy of PATH for its entire lifetime, so "clang not found"
+# right after install_prerequisites.bat reports LLVM installed successfully
+# (in the very same window) is expected unless we re-read the authoritative
+# value ourselves here, instead of relying on the terminal being reopened.
+$machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+$userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+$env:Path = "$machinePath;$userPath"
+
 Write-Host "=== Building Kinetix Installer ($Arch) ===" -ForegroundColor Cyan
 
 # Resolve workspace root (parent of scripts/)

@@ -9,6 +9,9 @@ echo ARM64 components (needed to link kivm/kicomp/the installer), and
 echo LLVM/Clang (needed by the "ring" crypto crate specifically to build for
 echo the ARM64 target -- MSVC's own compiler can't build it there).
 echo Safe to re-run -- each step checks first and skips if already done.
+echo Everything below runs back-to-back in this same window -- PATH is
+echo re-read from the registry after each install, so there's no need to
+echo close and reopen the terminal partway through.
 echo.
 
 where winget >nul 2>&1
@@ -29,11 +32,8 @@ rem winget report an ambiguous match instead of actually installing anything
 rem (and, worse, still exits 0 when that happens).
 winget install --id Rustlang.Rustup -e --source winget --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto :rust_failed
-echo.
-echo IMPORTANT: close and reopen this terminal so PATH picks up cargo/rustc,
-echo then re-run this script to continue with the MSVC Build Tools step.
-pause
-exit /b 0
+call :refresh_path
+goto :check_msvc
 
 :rust_failed
 echo.
@@ -72,11 +72,11 @@ rem found") and a component missing from the original install (e.g. the
 rem ARM64 tools) would silently never get added.
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --accept-source-agreements --accept-package-agreements --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended"
 if errorlevel 1 goto :msvc_failed
-echo.
-echo IMPORTANT: close and reopen this terminal (or restart) so the build tools
-echo are on PATH, then re-run this script to continue with the LLVM step.
-pause
-exit /b 0
+rem cl.exe/link.exe are never added to plain PATH regardless of install
+rem state (see the comment above) -- rustc locates them itself via the
+rem same vswhere mechanism, so unlike Rust and LLVM there's no PATH to
+rem refresh here, and no restart is actually needed for this step.
+goto :check_llvm
 
 :msvc_failed
 echo.
@@ -99,11 +99,8 @@ goto :add_targets
 echo Installing LLVM via winget...
 winget install --id LLVM.LLVM -e --source winget --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto :llvm_failed
-echo.
-echo IMPORTANT: close and reopen this terminal so PATH picks up clang-cl,
-echo then re-run this script to finish setting up cross targets.
-pause
-exit /b 0
+call :refresh_path
+goto :add_targets
 
 :llvm_failed
 echo.
@@ -120,7 +117,7 @@ rustup target add x86_64-pc-windows-msvc >nul 2>&1
 rustup target add aarch64-pc-windows-msvc >nul 2>&1
 
 echo.
-echo === Done. You can now run scripts\build_installer.ps1 ===
+echo === Done. You can now run scripts\build_installer.ps1 in this same window. ===
 pause
 exit /b 0
 
@@ -131,3 +128,13 @@ echo Install "App Installer" from the Microsoft Store, then re-run this script:
 echo   https://apps.microsoft.com/detail/9nblggh4nns1
 pause
 exit /b 1
+
+rem Re-reads PATH from the registry (Machine + User) into this process, so
+rem a tool installed moments ago by winget (cargo/rustc, clang-cl) is
+rem immediately usable without closing and reopening the terminal. Shells
+rem out to PowerShell for this instead of parsing "reg query" text, since
+rem .NET's GetEnvironmentVariable is unambiguous and rows in reg query's
+rem output are easy to misparse.
+:refresh_path
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')"`) do set "PATH=%%P"
+goto :eof
