@@ -799,25 +799,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
     fn parse_expression(&mut self, precedence: Precedence, allow_holy: bool) -> Option<Expression<'arena>> {
         let mut left = self.parse_prefix()?;
 
-        // Assignment: if next token is = and we parsed an identifier or member access
-        if self.peek_token == Token::Equal {
-            match &left {
-                Expression::Identifier(_) | Expression::MemberAccess { .. } | Expression::Index { .. } => {
-                    self.next_token(); // consume =
-                    self.next_token(); // move to value
-                    let value = self.parse_expression(Precedence::Lowest, true)?;
-                    return Some(Expression::Assign {
-                        target: self.arena.alloc(left),
-                        value: self.arena.alloc(value),
-                    });
-                },
-                _ => {}
-            }
-        }
-
-        while self.peek_token != Token::Semicolon 
+        while self.peek_token != Token::Semicolon
               && self.peek_token != Token::LBrace
-              && precedence < self.peek_precedence() 
+              && precedence < self.peek_precedence()
         {
             // If peek is LBracket but preceded by space, and we're in Holy-Shell context,
             // DO NOT parse it as an Index. Let Holy-Shell take it as an argument ArrayLiteral.
@@ -837,7 +821,25 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                 _ => break,
             }
         }
-        
+
+        // Assignment: if next token is = and we parsed an identifier or member access.
+        // Checked after the postfix loop above so `obj.field = x` and `arr[i] = x`
+        // see the fully-built MemberAccess/Index target, not just the bare prefix.
+        if self.peek_token == Token::Equal {
+            match &left {
+                Expression::Identifier(_) | Expression::MemberAccess { .. } | Expression::Index { .. } => {
+                    self.next_token(); // consume =
+                    self.next_token(); // move to value
+                    let value = self.parse_expression(Precedence::Lowest, true)?;
+                    return Some(Expression::Assign {
+                        target: self.arena.alloc(left),
+                        value: self.arena.alloc(value),
+                    });
+                },
+                _ => {}
+            }
+        }
+
         // --- Optional Parentheses (Holy-Shell style) ---
         // If we parsed an identifier or member access, and the NEXT token is an expression-starter
         // AND it's on the same line, parse it as a function call.
