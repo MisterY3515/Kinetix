@@ -47,6 +47,16 @@ $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 $env:Path = "$machinePath;$userPath"
 
+# Some LLVM releases don't register themselves on PATH at all even on a
+# successful install -- confirmed directly from cargo's own build-script
+# diagnostic dump: clang-cl.exe present on disk, but its directory absent
+# from both the Machine and User PATH above. Probe the standard install
+# location directly rather than trusting PATH registration.
+$llvmBin = Join-Path $env:ProgramFiles "LLVM\bin"
+if ((Test-Path (Join-Path $llvmBin "clang-cl.exe")) -and ($env:Path -notlike "*$llvmBin*")) {
+    $env:Path = "$llvmBin;$env:Path"
+}
+
 Write-Host "=== Building Kinetix Installer ($Arch) ===" -ForegroundColor Cyan
 
 # Resolve workspace root (parent of scripts/)

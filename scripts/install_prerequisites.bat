@@ -91,7 +91,15 @@ exit /b 1
 echo.
 echo [3/4] LLVM/Clang (required for the ARM64 target, optional native backend on x86_64)...
 where clang-cl >nul 2>&1
-if errorlevel 1 goto :install_llvm
+if not errorlevel 1 goto :llvm_present
+rem LLVM's installer doesn't reliably register itself on PATH even when
+rem winget reports success (confirmed directly from a real build: clang-cl.exe
+rem present on disk but absent from both Machine and User PATH) -- also probe
+rem the standard install location before deciding we actually need to install.
+if not exist "%ProgramFiles%\LLVM\bin\clang-cl.exe" goto :install_llvm
+set "PATH=%ProgramFiles%\LLVM\bin;%PATH%"
+
+:llvm_present
 echo LLVM/Clang already installed, skipping.
 goto :add_targets
 
@@ -100,6 +108,7 @@ echo Installing LLVM via winget...
 winget install --id LLVM.LLVM -e --source winget --accept-source-agreements --accept-package-agreements
 if errorlevel 1 goto :llvm_failed
 call :refresh_path
+if exist "%ProgramFiles%\LLVM\bin\clang-cl.exe" set "PATH=%ProgramFiles%\LLVM\bin;%PATH%"
 goto :add_targets
 
 :llvm_failed
