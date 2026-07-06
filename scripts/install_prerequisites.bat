@@ -44,15 +44,33 @@ exit /b 1
 :check_msvc
 echo.
 echo [2/4] MSVC C++ Build Tools (x86_64 + ARM64)...
-where cl >nul 2>&1
-if errorlevel 1 goto :install_msvc
-echo MSVC Build Tools already installed, skipping.
+rem "where cl" is NOT a reliable presence check: cl.exe is only ever on PATH
+rem inside a "Developer Command Prompt" (vcvars-loaded) session, never in a
+rem plain terminal, regardless of whether the Build Tools are installed --
+rem so this reported "missing" every single run and looped back into
+rem :install_msvc forever, never reaching the LLVM step below. Ask vswhere
+rem instead, the same tool cargo/rustc themselves use to locate MSVC.
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" goto :install_msvc
+set "VSPATH="
+for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath`) do set "VSPATH=%%i"
+if defined VSPATH goto :msvc_present
+goto :install_msvc
+
+:msvc_present
+echo MSVC Build Tools already installed (x86_64 + ARM64), skipping.
 goto :check_llvm
 
 :install_msvc
 echo Installing Visual Studio Build Tools (C++ workload + ARM64 tools) via winget.
 echo This downloads several GB and can take a while -- please wait, do not close this window.
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --accept-source-agreements --accept-package-agreements --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended"
+rem --force makes winget re-invoke the VS bootstrapper with our --override
+rem args even when it considers the package "already installed" with no
+rem version upgrade available -- without it winget just no-ops (as seen on
+rem this project: "Found an existing package... No available upgrade
+rem found") and a component missing from the original install (e.g. the
+rem ARM64 tools) would silently never get added.
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --accept-source-agreements --accept-package-agreements --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended"
 if errorlevel 1 goto :msvc_failed
 echo.
 echo IMPORTANT: close and reopen this terminal (or restart) so the build tools
