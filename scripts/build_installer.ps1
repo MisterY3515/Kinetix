@@ -7,7 +7,9 @@
 # use -Arch both when you actually need to produce both release artifacts.
 # Building the arm64 installer requires the "ARM64 build tools" component
 # for MSVC (Visual Studio Installer -> Individual Components -> MSVC v143 -
-# VS 2022 C++ ARM64 build tools) in addition to the default x86_64 toolchain.
+# VS 2022 C++ ARM64 build tools) *and* Clang/LLVM (the `ring` crate needs
+# clang-cl specifically to build for aarch64-pc-windows-msvc -- MSVC's own
+# compiler can't). scripts\install_prerequisites.bat installs both.
 #
 # Usage:
 #   .\scripts\build_installer.ps1                # host's own architecture (fast, default)
@@ -42,6 +44,17 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 
 $env:KINETIX_BUILD = "36"
+
+# Redirect cargo's own build output to a local disk. Network/shared-VM
+# drives (SMB-style semantics, e.g. a Parallels shared-folder drive letter)
+# don't reliably support the file-locking and rename operations rustc needs
+# when writing its build cache and .rlib archives, causing sporadic "failed
+# to remove temporary directory" (os error 87) failures. Only the two
+# staged binaries below -- which the installer's include_bytes! embeds via
+# a path hardcoded relative to this repo, so they can't be redirected --
+# still get written under $root itself.
+$env:CARGO_TARGET_DIR = Join-Path $env:LOCALAPPDATA "KinetixBuild"
+Write-Host "Using local build cache: $($env:CARGO_TARGET_DIR)" -ForegroundColor DarkGray
 
 # Filename labels stay "x86_64"/"arm64" (matching the KinetixInstaller-<os>-<arch>
 # convention used for all platforms), independent of the shorter "x64" the
@@ -87,8 +100,8 @@ foreach ($target in $targets.Keys) {
     # architecture happened to be built last.
     $targetRelease = Join-Path $root "target\release"
     New-Item -ItemType Directory -Path $targetRelease -Force | Out-Null
-    Copy-Item (Join-Path $root "target\$target\release\kivm.exe") (Join-Path $targetRelease "kivm.exe") -Force
-    Copy-Item (Join-Path $root "target\$target\release\kicomp.exe") (Join-Path $targetRelease "kicomp.exe") -Force
+    Copy-Item (Join-Path $env:CARGO_TARGET_DIR "$target\release\kivm.exe") (Join-Path $targetRelease "kivm.exe") -Force
+    Copy-Item (Join-Path $env:CARGO_TARGET_DIR "$target\release\kicomp.exe") (Join-Path $targetRelease "kicomp.exe") -Force
 
     Write-Host "--- [$label] Compiling installer ($target) ---" -ForegroundColor Yellow
     Push-Location (Join-Path $root "crates\installer")
@@ -101,7 +114,7 @@ foreach ($target in $targets.Keys) {
     }
     Pop-Location
 
-    $installerSrc = Join-Path $root "target\$target\release\installer.exe"
+    $installerSrc = Join-Path $env:CARGO_TARGET_DIR "$target\release\installer.exe"
     if (!(Test-Path $installerSrc)) {
         Write-Host "ERROR: installer.exe not found at $installerSrc" -ForegroundColor Red
         Read-Host "Press Enter to exit"

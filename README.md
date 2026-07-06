@@ -233,7 +233,8 @@ Or set them up manually:
    - *Windows*: MSVC Build Tools -- "Desktop development with C++" workload, plus the "MSVC v143 - VS 2022 C++ ARM64 build tools" component if you also need the arm64 target.
    - *Linux*: `pkg-config`, `libasound2-dev`, `libgtk-3-dev`, `libxcb1-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev` (or your distro's equivalents).
    - *macOS*: Xcode Command Line Tools (`xcode-select --install`).
-3. **LLVM 21 (Optional but Recommended)**: Required to build the native LLVM backend features (`kivm compile --native`).
+3. **Clang, on Windows ARM64 specifically**: the `ring` crate (pulled in transitively for TLS/HTTPS support) [requires Clang to compile for `aarch64-pc-windows-msvc`](https://github.com/briansmith/ring/blob/main/build/build/c.rs) -- MSVC's own compiler can't build it there. Not needed for `x86_64-pc-windows-msvc` or other platforms. Install via `winget install --id LLVM.LLVM` (this is the same LLVM install as the optional backend below, so you only need it once either way).
+4. **LLVM 21 (Optional but Recommended)**: Required to build the native LLVM backend features (`kivm compile --native`).
    - *Windows*: Download and install pre-built LLVM 21 binaries or compile LLVM from source. Ensure `LLVM_SYS_210_PREFIX` points to your LLVM installation directory.
    - *Linux*: Install `llvm-21-dev` and `libpolly-21-dev` via your package manager.
 
