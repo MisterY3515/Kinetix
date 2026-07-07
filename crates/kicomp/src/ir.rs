@@ -6,120 +6,129 @@ use serde::{Serialize, Deserialize};
 /// Each opcode encodes an operation for the register-based VM.
 /// Instruction format: (Opcode, A, B, C) where A/B/C are register indices
 /// or indices into the constant pool depending on the opcode.
+// Build 37: discriminants are dense and sequential (0..N) rather than the
+// previous banded scheme (0, 10, 20, ..., 255) -- this is a register-based
+// VM's opcode dispatch match, and a dense range lets rustc/LLVM lower it to
+// a single flat jump table instead of a sparse switch. The explicit gaps
+// served no other purpose: the .exki format serializes `CompiledProgram` as
+// JSON (see exn.rs), which encodes enum variants by name, not by numeric
+// discriminant, and nothing else in the codebase casts an Opcode to its u8
+// value -- verified via grep before this change. New opcodes should just be
+// appended at the end; there's no serialization reason to reserve gaps.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Opcode {
     /// Load constant pool[B] into register A
-    LoadConst = 0,
+    LoadConst,
     /// Load null into register A
-    LoadNull = 1,
+    LoadNull,
     /// Load true into register A
-    LoadTrue = 2,
+    LoadTrue,
     /// Load false into register A
-    LoadFalse = 3,
+    LoadFalse,
 
     // Arithmetic: A = B op C
-    Add = 10,
-    Sub = 11,
-    Mul = 12,
-    Div = 13,
-    Mod = 14,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
     /// Negate: A = -B
-    Neg = 15,
+    Neg,
 
     // Comparison: A = B op C  (result is bool)
-    Eq = 20,
-    Neq = 21,
-    Lt = 22,
-    Gt = 23,
-    Lte = 24,
-    Gte = 25,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
 
     // Logical
-    Not = 30,
+    Not,
     /// And: A = B && C
-    And = 31,
+    And,
     /// Or: A = B || C
-    Or = 32,
+    Or,
 
     // String
     /// Concat: A = B + C (string concat)
-    Concat = 35,
+    Concat,
 
     // Variables
     /// Get local variable at slot B into register A
-    GetLocal = 40,
+    GetLocal,
     /// Set local variable at slot A from register B
-    SetLocal = 41,
+    SetLocal,
     /// Get global variable (name in const pool[B]) into register A
-    GetGlobal = 42,
+    GetGlobal,
     /// Set global variable (name in const pool[A]) from register B
-    SetGlobal = 43,
+    SetGlobal,
 
     // Reactive Core
     /// Set reactive state (name in const pool[A]) from register B
-    SetState = 44,
+    SetState,
     /// Init computed value (name in const pool[A]) from register B
-    InitComputed = 45,
+    InitComputed,
     /// Update existing reactive state (name in const pool[A]) with register B
-    UpdateState = 46,
+    UpdateState,
     /// Init reactive effect (dependencies array in A, closure in register B)
-    InitEffect = 47,
+    InitEffect,
 
     // Object/Array
     /// Get member: A = B.const[C] (field name in constant pool)
-    GetMember = 50,
+    GetMember,
     /// Set member: A.const[B] = C
-    SetMember = 51,
+    SetMember,
     /// Get index: A = B[C]
-    GetIndex = 52,
+    GetIndex,
     /// Set index: A[B] = C
-    SetIndex = 53,
+    SetIndex,
     /// Make array with B elements starting from register A, result in A
-    MakeArray = 54,
-    
+    MakeArray,
+
     /// Make map with B key-value pairs from registers A..A+B*2
-    MakeMap = 55,
+    MakeMap,
     /// Make range [B..C) -> A
-    MakeRange = 56,
+    MakeRange,
     /// Get Iterator: A = iter(B)
-    GetIter = 57,
+    GetIter,
     /// Advance Iterator: A = next(B), jump to C if done
-    IterNext = 58,
+    IterNext,
 
     // Control flow
     /// Jump to instruction at offset A (absolute)
-    Jump = 60,
+    Jump,
     /// Jump to offset A if register B is falsy
-    JumpIfFalse = 61,
+    JumpIfFalse,
     /// Jump to offset A if register B is truthy
-    JumpIfTrue = 62,
+    JumpIfTrue,
 
     // Functions
     /// Call function in register A with B arguments (args in A+1..A+B), result in A
-    Call = 70,
+    Call,
     /// Return value in register A
-    Return = 71,
+    Return,
     /// Return void
-    ReturnVoid = 72,
+    ReturnVoid,
     /// Create closure: A = closure(const[B]) capturing C registers
-    MakeClosure = 73,
+    MakeClosure,
     /// Tail Call: Reuse current frame for recursive call
-    TailCall = 74,
+    TailCall,
     /// Load method: A = BoundMethod(object: B, method_name_idx: C)
-    LoadMethod = 75,
+    LoadMethod,
 
     // Built-in operations
     /// Print register A
-    Print = 80,
+    Print,
 
     // VM control
     /// Pop register A (discard value, mark as free)
-    Pop = 90,
+    Pop,
     /// No operation
-    Nop = 91,
+    Nop,
     /// Halt execution
-    Halt = 255,
+    Halt,
 }
 
 /// A single bytecode instruction: opcode + 3 operands.
