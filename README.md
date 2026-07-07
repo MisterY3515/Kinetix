@@ -163,7 +163,7 @@ println(term.bold("important") + " and " + term.italic("elegant"))
 
 ```bash
 $ kivm shell
-Kinetix Shell v0.0.9 (36)
+Kinetix Shell v0.0.9 (37)
 
 ~ ❯ println(2 + 2)
 4

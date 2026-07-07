@@ -62,7 +62,7 @@ Write-Host "=== Building Kinetix Installer ($Arch) ===" -ForegroundColor Cyan
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 
-$env:KINETIX_BUILD = "36"
+$env:KINETIX_BUILD = "37"
 
 # Redirect cargo's own build output to a local disk. Network/shared-VM
 # drives (SMB-style semantics, e.g. a Parallels shared-folder drive letter)

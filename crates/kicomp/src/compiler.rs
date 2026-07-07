@@ -5,12 +5,12 @@ use crate::ir::*;
 use std::collections::HashMap;
 
 /// Current build version of the compiler/VM. Reads the same KINETIX_BUILD
-/// env var the build scripts set (falls back to 36 for plain `cargo build`
+/// env var the build scripts set (falls back to 37 for plain `cargo build`
 /// invocations that don't set it) -- previously this was a second, separate
 /// hardcoded number that silently drifted out of sync with KINETIX_BUILD.
 pub const CURRENT_BUILD: i64 = match option_env!("KINETIX_BUILD") {
     Some(s) => parse_build_number(s),
-    None => 36,
+    None => 37,
 };
 
 const fn parse_build_number(s: &str) -> i64 {

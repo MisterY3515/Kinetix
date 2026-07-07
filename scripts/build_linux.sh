@@ -17,8 +17,6 @@
 #   ./scripts/build_linux.sh both        # both (release prep)
 set -e
 
-KINETIX_BUILD="36"
-
 case "$(uname -m)" in
     x86_64|amd64) HOST_ARCH="x86_64" ;;
     arm64|aarch64) HOST_ARCH="aarch64" ;;
@@ -29,6 +27,8 @@ if [[ "$ARCH" != "x86_64" && "$ARCH" != "aarch64" && "$ARCH" != "both" ]]; then
     echo "Error: unknown arch '$ARCH' (expected x86_64, aarch64, or both)"
     exit 1
 fi
+
+export KINETIX_BUILD="37"
 
 # Ensure we are running from the workspace root
 cd "$(dirname "$0")/.."
