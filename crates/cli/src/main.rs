@@ -56,9 +56,15 @@ enum Commands {
         /// Create a standalone executable (bundle)
         #[arg(long)]
         exe: bool,
-        /// Compile to native machine code (LLVM)
+        /// Compile to native machine code (LLVM) and link a native executable
         #[arg(long)]
         native: bool,
+        /// Use LLVM O3 instead of the O2 baseline (native compilation only)
+        #[arg(long)]
+        o3: bool,
+        /// Strip symbols from the linked native executable (native compilation only)
+        #[arg(long)]
+        strip: bool,
         /// Print compiler optimization metrics
         #[arg(long)]
         metrics: bool,
@@ -504,7 +510,7 @@ fn run() -> Result<(), String> {
                 println!("Total Heap Allocations: {}", vm.mem_stats.total_heap_allocations);
             }
         }
-        Commands::Compile { input, output, exe, native, metrics, no_opt } => {
+        Commands::Compile { input, output, exe, native, o3, strip, metrics, no_opt } => {
             let source = fs::read_to_string(&input).map_err(|e| format!("Error reading {}: {}", input.display(), e))?;
             
             if source.trim_start().starts_with("{\\rtf") {
@@ -641,14 +647,27 @@ fn run() -> Result<(), String> {
                 #[cfg(feature = "llvm")]
                 {
                     let output_path = output.unwrap_or_else(|| {
-                        // Default to .o for native object files
-                        input.with_extension("o")
+                        if cfg!(target_os = "windows") {
+                            input.with_extension("exe")
+                        } else {
+                            input.with_extension("")
+                        }
                     });
-                    
-                    println!("Compiling to native object file: {}", output_path.display());
-                    kinetix_kicomp::llvm_codegen::compile_program_to_object(&ast.statements, &output_path)
-                        .map_err(|e| format!("LLVM Codegen error: {}", e))?;
-                        
+
+                    // An explicit `.o` output keeps the old object-only behavior
+                    // (e.g. for embedding into an external build); anything else
+                    // goes through the real link step (Build 37).
+                    let emit_object_only = output_path.extension().map(|e| e == "o").unwrap_or(false);
+                    if emit_object_only {
+                        println!("Compiling to native object file: {}", output_path.display());
+                        kinetix_kicomp::llvm_codegen::compile_program_to_object(&ast.statements, &output_path, o3)
+                            .map_err(|e| format!("LLVM Codegen error: {}", e))?;
+                    } else {
+                        println!("Compiling to native executable: {}", output_path.display());
+                        kinetix_kicomp::llvm_codegen::compile_program_to_executable(&ast.statements, &output_path, o3, strip)
+                            .map_err(|e| format!("Native compilation error: {}", e))?;
+                    }
+
                     println!("Native compilation successful.");
                     return Ok(());
                 }

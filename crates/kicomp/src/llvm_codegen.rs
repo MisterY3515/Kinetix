@@ -1,7 +1,6 @@
 use inkwell::context::Context;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
-use inkwell::passes::PassManager;
 use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue, IntValue, FloatValue};
 use inkwell::types::BasicTypeEnum;
 use inkwell::FloatPredicate;
@@ -16,11 +15,10 @@ pub struct LLVMCodegen<'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
-    fpm: PassManager<FunctionValue<'ctx>>,
-    
+
     // Symbol table for current scope: variable name -> pointer to stack allocation
     variables: HashMap<String, PointerValue<'ctx>>,
-    
+
     // Current function being compiled
     current_fn: Option<FunctionValue<'ctx>>,
 }
@@ -29,23 +27,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
     pub fn new(context: &'ctx Context, module_name: &str) -> Self {
         let module = context.create_module(module_name);
         let builder = context.create_builder();
-        let fpm = PassManager::create(&module);
-
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_gvn_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promot_memory_to_register_pass();
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.initialize();
 
         Self {
             context,
             module,
             builder,
-            fpm,
             variables: HashMap::new(),
             current_fn: None,
         }
@@ -219,8 +205,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 .map_err(|e| e.to_string())?;
         }
 
-        // Run function pass manager
-        self.fpm.run_on(&function);
+        // Optimization now runs module-wide via the new Pass Manager in emit_object()
+        // (Build 37: legacy per-function passes were removed upstream in LLVM 17+).
 
         // Restore state
         self.current_fn = saved_fn;
@@ -273,7 +259,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let data_ptr = self.builder.build_call(malloc_fn, &[bytes_val.into()], "malloc_array")
                     .map_err(|e| e.to_string())?
                     .try_as_basic_value()
-                    .left()
+                    .basic()
                     .unwrap();
                 
                 let i64_ptr_type = i64_type.ptr_type(inkwell::AddressSpace::default());
@@ -289,7 +275,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         elem_val.into_int_value()
                     } else if elem_val.is_float_value() {
                         // For simplicity in array storing, cast float to bitwise i64
-                        self.builder.build_bitcast(elem_val.into_float_value(), i64_type, "bitcast_float").unwrap().into_int_value()
+                        self.builder.build_bit_cast(elem_val.into_float_value(), i64_type, "bitcast_float").unwrap().into_int_value()
                     } else {
                         // Struct or other? Just store 0 for now as dummy.
                         i64_type.const_int(0, false)
@@ -319,7 +305,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 self.compile_binary_op(l, operator, r)
             }
             Expression::Call { function, arguments } => {
-                if let Expression::Identifier(name) = function.as_ref() {
+                if let Expression::Identifier(name) = *function {
                     if name == "print" || name == "println" {
                         return self.compile_print(arguments, name == "println");
                     }
@@ -333,7 +319,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                                     self.builder.build_signed_int_to_float(arg.into_int_value(), self.context.f64_type(), "cast").unwrap()
                                 } else { arg.into_float_value() };
                                 let f = self.module.get_function(fn_name).unwrap();
-                                let ret = self.builder.build_call(f, &[arg_f.into()], "math").unwrap().try_as_basic_value().left().unwrap();
+                                let ret = self.builder.build_call(f, &[arg_f.into()], "math").unwrap().try_as_basic_value().basic().unwrap();
                                 return Ok(ret);
                             }
                             "pow" => {
@@ -343,7 +329,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                                 let f1 = if a1.is_int_value() { self.builder.build_signed_int_to_float(a1.into_int_value(), self.context.f64_type(), "c").unwrap() } else { a1.into_float_value() };
                                 let f2 = if a2.is_int_value() { self.builder.build_signed_int_to_float(a2.into_int_value(), self.context.f64_type(), "c").unwrap() } else { a2.into_float_value() };
                                 let f = self.module.get_function("pow").unwrap();
-                                let ret = self.builder.build_call(f, &[f1.into(), f2.into()], "pow").unwrap().try_as_basic_value().left().unwrap();
+                                let ret = self.builder.build_call(f, &[f1.into(), f2.into()], "pow").unwrap().try_as_basic_value().basic().unwrap();
                                 return Ok(ret);
                             }
                             _ => {}
@@ -359,7 +345,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         }
                         let call = self.builder.build_call(func, &args, &format!("call_{}", name))
                             .map_err(|e| e.to_string())?;
-                        return match call.try_as_basic_value().left() {
+                        return match call.try_as_basic_value().basic() {
                             Some(v) => Ok(v),
                             None => Ok(self.context.i64_type().const_int(0, false).into()),
                         };
@@ -510,24 +496,37 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(())
     }
 
-    pub fn emit_object(&self, path: &Path) -> Result<(), String> {
-        use inkwell::targets::{Target, InitializationConfig};
+    /// Emit a native object file. `opt_level` is the LLVM backend optimization level:
+    /// `Default` is the enforced O2 baseline (Build 37), `Aggressive` is the optional O3.
+    pub fn emit_object(&self, path: &Path, opt_level: inkwell::OptimizationLevel) -> Result<(), String> {
+        use inkwell::targets::{Target, TargetMachine, InitializationConfig};
+        use inkwell::passes::PassBuilderOptions;
 
         Target::initialize_native(&InitializationConfig::default()).map_err(|e| e.to_string())?;
-        
-        let triple = Target::get_default_triple();
+
+        let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
         let machine = target.create_target_machine(
             &triple,
             "generic",
             "",
-            inkwell::OptimizationLevel::Default,
+            opt_level,
             inkwell::targets::RelocMode::Default,
             inkwell::targets::CodeModel::Default
         ).ok_or("Could not create target machine")?;
 
         self.module.set_data_layout(&machine.get_target_data().get_data_layout());
         self.module.set_triple(&triple);
+
+        // New Pass Manager module-wide optimization pipeline (legacy per-function
+        // passes were removed upstream in LLVM 17+, see Build 37 notes above the struct).
+        let passes = match opt_level {
+            inkwell::OptimizationLevel::Aggressive => "default<O3>",
+            _ => "default<O2>",
+        };
+        self.module
+            .run_passes(passes, &machine, PassBuilderOptions::create())
+            .map_err(|e| e.to_string())?;
 
         machine.write_to_file(&self.module, inkwell::targets::FileType::Object, path)
             .map_err(|e| e.to_string())?;
@@ -554,11 +553,59 @@ impl<'ctx> LLVMCodegen<'ctx> {
 }
 
 /// Convenience function to compile a program to an object file
-pub fn compile_program_to_object(statements: &[Statement], output_path: &Path) -> Result<(), String> {
+pub fn compile_program_to_object(statements: &[Statement], output_path: &Path, o3: bool) -> Result<(), String> {
     let context = Context::create();
     let mut codegen = LLVMCodegen::new(&context, "main");
     codegen.compile(statements)?;
-    codegen.emit_object(output_path)
+    let opt_level = if o3 { inkwell::OptimizationLevel::Aggressive } else { inkwell::OptimizationLevel::Default };
+    codegen.emit_object(output_path, opt_level)
+}
+
+/// Link a native object file into an executable using the system `clang` toolchain
+/// (already a required dependency wherever the `llvm` feature is built). `strip`
+/// runs the system `strip` tool on the linked binary (Build 37 "Symbol stripping
+/// pipeline") -- the linker's own `-s` flag is a no-op on some platforms (e.g. ld64
+/// on macOS logs it as "obsolete" and leaves symbols like `_main` untouched), while
+/// a real post-link `strip` reliably removes them.
+pub fn link_executable(object_path: &Path, output_path: &Path, strip: bool) -> Result<(), String> {
+    let output = std::process::Command::new("clang")
+        .arg(object_path)
+        .arg("-o")
+        .arg(output_path)
+        .output()
+        .map_err(|e| format!("Failed to invoke clang for linking: {e}. Ensure clang is installed and in PATH."))?;
+    if !output.status.success() {
+        return Err(format!("Linking failed:\n{}", String::from_utf8_lossy(&output.stderr)));
+    }
+
+    if strip {
+        let strip_output = std::process::Command::new("strip")
+            .arg(output_path)
+            .output()
+            .map_err(|e| format!("Failed to invoke strip: {e}. Ensure strip is installed and in PATH."))?;
+        if !strip_output.status.success() {
+            return Err(format!("Stripping failed:\n{}", String::from_utf8_lossy(&strip_output.stderr)));
+        }
+    }
+
+    Ok(())
+}
+
+/// Compile a program straight to a linked native executable: object emission (Build 37
+/// O2 baseline / optional O3) followed by a real link step (Build 37 fixes the previous
+/// gap where native compilation stopped at a dead-end `.o` file). The intermediate
+/// object file is removed after a successful link.
+pub fn compile_program_to_executable(
+    statements: &[Statement],
+    output_path: &Path,
+    o3: bool,
+    strip: bool,
+) -> Result<(), String> {
+    let object_path = output_path.with_extension("o");
+    compile_program_to_object(statements, &object_path, o3)?;
+    let result = link_executable(&object_path, output_path, strip);
+    let _ = std::fs::remove_file(&object_path);
+    result
 }
 
 /// Convenience function to run JIT
