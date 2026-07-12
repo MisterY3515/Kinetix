@@ -560,6 +560,19 @@ impl VM {
                  let right = frame.reg(instr.c).is_truthy();
                  frame.set_reg(instr.a, Value::Bool(left || right));
             }
+            Opcode::Neg => {
+                 let val = frame.reg(instr.b).clone();
+                 let result = match val {
+                     Value::Int(n) => Value::Int(-n),
+                     Value::Float(f) => Value::Float(-f),
+                     other => return Err(format!("Invalid type for Neg: {:?}", other)),
+                 };
+                 frame.set_reg(instr.a, result);
+            }
+            Opcode::Not => {
+                 let val = frame.reg(instr.b).is_truthy();
+                 frame.set_reg(instr.a, Value::Bool(!val));
+            }
 
             Opcode::Print => {
                 let val = frame.reg(instr.a);
@@ -666,6 +679,32 @@ impl VM {
                         }
                     },
                     _ => return Err("GetMember: target not a map".into()),
+                }
+            }
+            Opcode::GetIndex => {
+                let idx = frame.reg(instr.c).as_int()?;
+                match frame.reg(instr.b) {
+                    Value::Array(arr) => {
+                        match usize::try_from(idx).ok().filter(|&i| i < arr.len()) {
+                            Some(i) => frame.set_reg(instr.a, arr[i].clone()),
+                            None => return Err(format!("Index {} out of bounds for array of length {}", idx, arr.len())),
+                        }
+                    }
+                    other => return Err(format!("GetIndex: expected array, got {:?}", other)),
+                }
+            }
+            Opcode::SetIndex => {
+                let idx = frame.reg(instr.b).as_int()?;
+                let val = frame.reg(instr.c).clone();
+                match frame.reg_mut(instr.a) {
+                    Value::Array(arr) => {
+                        let len = arr.len();
+                        match usize::try_from(idx).ok().filter(|&i| i < len) {
+                            Some(i) => arr[i] = val,
+                            None => return Err(format!("Index {} out of bounds for array of length {}", idx, len)),
+                        }
+                    }
+                    other => return Err(format!("SetIndex: expected array, got {:?}", other)),
                 }
             }
             Opcode::MakeArray => {
@@ -856,4 +895,92 @@ pub enum StepResult {
     Return(Value),
     Call(Value, Vec<Value>, u16),
     TailCall(Value, Vec<Value>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds a program whose `main` is exactly `instructions`, runs it, and
+    /// returns the finished VM so tests can assert on `vm.output` or on the
+    /// registers a caller wouldn't normally see.
+    fn run_main(instructions: Vec<Instruction>, constants: Vec<Constant>) -> Result<VM, String> {
+        let mut program = CompiledProgram::new();
+        program.main.instructions = instructions;
+        program.main.constants = constants;
+        let mut vm = VM::new(program);
+        vm.run()?;
+        Ok(vm)
+    }
+
+    #[test]
+    fn test_get_index_reads_array_element() {
+        let consts = vec![Constant::Integer(10), Constant::Integer(20), Constant::Integer(1)];
+        let vm = run_main(vec![
+            Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 10
+            Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 20
+            Instruction::ab(Opcode::MakeArray, 0, 2), // r0 = [r0, r1]
+            Instruction::ab(Opcode::LoadConst, 1, 2), // r1 = 1 (index)
+            Instruction::new(Opcode::GetIndex, 2, 0, 1), // r2 = r0[r1]
+            Instruction::a_only(Opcode::Print, 2),
+            Instruction::a_only(Opcode::Halt, 0),
+        ], consts).expect("should run without error");
+        assert_eq!(vm.output, vec!["20".to_string()]);
+    }
+
+    #[test]
+    fn test_get_index_out_of_bounds_errors() {
+        let consts = vec![Constant::Integer(10), Constant::Integer(5)];
+        let result = run_main(vec![
+            Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 10
+            Instruction::ab(Opcode::MakeArray, 0, 1), // r0 = [r0]
+            Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 5 (out of bounds)
+            Instruction::new(Opcode::GetIndex, 2, 0, 1),
+            Instruction::a_only(Opcode::Halt, 0),
+        ], consts);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_index_writes_array_element() {
+        let consts = vec![Constant::Integer(1), Constant::Integer(2), Constant::Integer(99), Constant::Integer(0)];
+        let vm = run_main(vec![
+            Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 1
+            Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 2
+            Instruction::ab(Opcode::MakeArray, 0, 2), // r0 = [r0, r1]
+            Instruction::ab(Opcode::LoadConst, 1, 3), // r1 = 0 (index)
+            Instruction::ab(Opcode::LoadConst, 2, 2), // r2 = 99 (value)
+            Instruction::new(Opcode::SetIndex, 0, 1, 2), // r0[r1] = r2
+            Instruction::new(Opcode::GetIndex, 3, 0, 1), // r3 = r0[0]
+            Instruction::a_only(Opcode::Print, 3),
+            Instruction::a_only(Opcode::Halt, 0),
+        ], consts).expect("should run without error");
+        assert_eq!(vm.output, vec!["99".to_string()]);
+    }
+
+    #[test]
+    fn test_neg_int_and_float() {
+        let consts = vec![Constant::Integer(5), Constant::Float(2.5)];
+        let vm = run_main(vec![
+            Instruction::ab(Opcode::LoadConst, 0, 0), // r0 = 5
+            Instruction::new(Opcode::Neg, 0, 0, 0),   // r0 = -5
+            Instruction::a_only(Opcode::Print, 0),
+            Instruction::ab(Opcode::LoadConst, 1, 1), // r1 = 2.5
+            Instruction::new(Opcode::Neg, 1, 1, 0),   // r1 = -2.5
+            Instruction::a_only(Opcode::Print, 1),
+            Instruction::a_only(Opcode::Halt, 0),
+        ], consts).expect("should run without error");
+        assert_eq!(vm.output, vec!["-5".to_string(), "-2.5".to_string()]);
+    }
+
+    #[test]
+    fn test_not_flips_truthiness() {
+        let vm = run_main(vec![
+            Instruction::a_only(Opcode::LoadTrue, 0),
+            Instruction::new(Opcode::Not, 0, 0, 0), // r0 = !true
+            Instruction::a_only(Opcode::Print, 0),
+            Instruction::a_only(Opcode::Halt, 0),
+        ], vec![]).expect("should run without error");
+        assert_eq!(vm.output, vec!["false".to_string()]);
+    }
 }

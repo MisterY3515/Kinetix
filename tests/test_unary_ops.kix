@@ -1,0 +1,17 @@
+// test_unary_ops.kix - Neg/Not regression coverage (Build 38 Phase A).
+// Before this fix both opcodes were unimplemented in the VM and crashed at
+// runtime on any `-x` or `!b` expression.
+
+let x = 5
+assert(-x == -5)
+
+let f = 2.5
+assert(-f == -2.5)
+
+let t = true
+assert((!t) == false)
+
+let b = false
+assert((!b) == true)
+
+println("test_unary_ops: OK")

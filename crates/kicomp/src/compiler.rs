@@ -53,6 +53,13 @@ impl Scope {
     }
 }
 
+/// Tracks the backpatch targets for `break`/`continue` inside one loop, so
+/// nested loops each patch their own jumps to their own exit/continue point.
+struct LoopContext {
+    break_jumps: Vec<usize>,
+    continue_jumps: Vec<usize>,
+}
+
 /// The main compiler struct.
 pub struct Compiler {
     pub program: CompiledProgram,
@@ -67,6 +74,9 @@ pub struct Compiler {
     /// catch-all binding `x`) -- this set disambiguates it, mirroring the fix
     /// applied to the same ambiguity in `hir.rs` (`SymbolTable::is_nullary_variant`).
     known_nullary_variants: std::collections::HashSet<String>,
+    /// Stack of enclosing loops, innermost last, so `break`/`continue` patch
+    /// against the nearest loop only.
+    loop_stack: Vec<LoopContext>,
 }
 
 impl Compiler {
@@ -78,6 +88,7 @@ impl Compiler {
             max_temp: 0,
             current_line: 1,
             known_nullary_variants: std::collections::HashSet::new(),
+            loop_stack: vec![],
         }
     }
 
@@ -604,8 +615,19 @@ impl Compiler {
             // and a trait is a pure compile-time interface (method signatures
             // only, no bodies -- those live in `impl` blocks, above).
             Statement::Struct { .. } | Statement::Trait { .. } => {}
-            Statement::Break { .. } | Statement::Continue { .. } => {
-                // Handled by loop context (M4)
+            Statement::Break { .. } => {
+                let jump_idx = self.emit_instr(Instruction::a_only(Opcode::Jump, 0));
+                match self.loop_stack.last_mut() {
+                    Some(ctx) => ctx.break_jumps.push(jump_idx),
+                    None => return Err("'break' used outside of a loop".to_string()),
+                }
+            }
+            Statement::Continue { .. } => {
+                let jump_idx = self.emit_instr(Instruction::a_only(Opcode::Jump, 0));
+                match self.loop_stack.last_mut() {
+                    Some(ctx) => ctx.continue_jumps.push(jump_idx),
+                    None => return Err("'continue' used outside of a loop".to_string()),
+                }
             }
             Statement::Version { build, .. } => {
                 if *build > CURRENT_BUILD {
@@ -680,6 +702,7 @@ impl Compiler {
         let cond_reg = self.compile_expression(condition)?;
         let jump_idx = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
 
+        self.loop_stack.push(LoopContext { break_jumps: vec![], continue_jumps: vec![] });
         if let Statement::Block { statements, .. } = body {
             for s in statements {
                 self.compile_statement(s)?;
@@ -688,31 +711,94 @@ impl Compiler {
                 }
             }
         }
+        let ctx = self.loop_stack.pop().expect("pushed above");
+        for idx in &ctx.continue_jumps {
+            self.current_fn().instructions[*idx].a = loop_start as u16;
+        }
 
         self.emit_instr(Instruction::a_only(Opcode::Jump, loop_start as u16));
         let exit_pos = self.current_fn().instructions.len();
         self.current_fn().instructions[jump_idx].a = exit_pos as u16;
+        for idx in &ctx.break_jumps {
+            self.current_fn().instructions[*idx].a = exit_pos as u16;
+        }
 
         Ok(())
     }
 
     fn compile_for(&mut self, variable: &str, iterable: &Expression<'_>, body: &Statement<'_>) -> Result<(), String> {
         let iter_reg = self.compile_expression(iterable)?;
-        let idx_reg = self.alloc_register();
-        let var_reg = self.current_scope_mut().define(variable);
-        if self.current_scope_mut().next_register > self.max_temp { self.max_temp = self.current_scope_mut().next_register; }
 
+        // Compute the length once via the `len` builtin instead of relying on
+        // the fetched element's own truthiness to detect loop end -- that
+        // treated any falsy element (0, false, "", null) as a spurious "end
+        // of array", silently truncating the iteration.
+        let len_name_idx = self.current_fn().add_constant(Constant::String("len".to_string()));
+        let len_func_reg = self.alloc_register();
+        self.emit_instr(Instruction::ab(Opcode::GetGlobal, len_func_reg, len_name_idx));
+        let call_reg = self.alloc_register();
+        self.emit_instr(Instruction::ab(Opcode::SetLocal, call_reg, len_func_reg));
+        let expected_arg_reg = call_reg + 1;
+        if iter_reg != expected_arg_reg {
+            while self.next_temp <= expected_arg_reg {
+                self.alloc_register();
+            }
+            self.emit_instr(Instruction::ab(Opcode::SetLocal, expected_arg_reg, iter_reg));
+        }
+        self.emit_instr(Instruction::ab(Opcode::Call, call_reg, 1));
+        let len_reg = call_reg;
+
+        let idx_reg = self.alloc_register();
         let zero_const = self.current_fn().add_constant(Constant::Integer(0));
         self.emit_instr(Instruction::ab(Opcode::LoadConst, idx_reg, zero_const));
 
-        let loop_start = self.current_fn().instructions.len();
-        self.emit_instr(Instruction::new(Opcode::GetIndex, var_reg, iter_reg, idx_reg));
-        let jump_idx = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, var_reg));
+        // The loop variable is a scope-tracked local (so the body can reference
+        // it by name), but `Scope::define` hands out registers from its own
+        // counter (`next_register`), independent of `next_temp` (the temp
+        // counter used by `alloc_register` above) -- without resyncing first,
+        // `var_reg` could alias `iter_reg`/`len_func_reg`/`idx_reg`. This was a
+        // latent bug masked until now by `GetIndex` being unimplemented, so no
+        // `for` loop ever ran far enough to hit the corruption.
+        if self.next_temp > self.current_scope_mut().next_register {
+            self.current_scope_mut().next_register = self.next_temp;
+        }
+        // `define` inserts into the enclosing scope's locals map (compile_for
+        // never pushes its own Scope), so without saving/restoring whatever
+        // was bound to `variable` before the loop, the loop variable would
+        // permanently shadow it afterwards -- e.g. `for i in 0..5 {}` followed
+        // later by `mut i = 0` would keep resolving `i` to the loop's stale
+        // register instead of the new global.
+        let previous_binding = self.current_scope_mut().locals.get(variable).copied();
+        let var_reg = self.current_scope_mut().define(variable);
+        self.next_temp = self.current_scope_mut().next_register;
+        if self.next_temp > self.max_temp {
+            self.max_temp = self.next_temp;
+        }
 
+        let loop_start = self.current_fn().instructions.len();
+        let cond_reg = self.alloc_register();
+        self.emit_instr(Instruction::new(Opcode::Lt, cond_reg, idx_reg, len_reg));
+        let jump_idx = self.emit_instr(Instruction::ab(Opcode::JumpIfFalse, 0, cond_reg));
+        self.emit_instr(Instruction::new(Opcode::GetIndex, var_reg, iter_reg, idx_reg));
+
+        self.loop_stack.push(LoopContext { break_jumps: vec![], continue_jumps: vec![] });
         if let Statement::Block { statements, .. } = body {
             for s in statements {
                 self.compile_statement(s)?;
             }
+        }
+        let ctx = self.loop_stack.pop().expect("pushed above");
+
+        match previous_binding {
+            Some(info) => { self.current_scope_mut().locals.insert(variable.to_string(), info); }
+            None => { self.current_scope_mut().locals.remove(variable); }
+        }
+
+        // `continue` must land here so the index still gets incremented --
+        // jumping straight to loop_start would re-check the same index forever.
+        let increment_start = self.current_fn().instructions.len();
+        for idx in &ctx.continue_jumps {
+            self.current_fn().instructions[*idx].a = increment_start as u16;
         }
 
         let one_const = self.current_fn().add_constant(Constant::Integer(1));
@@ -723,6 +809,9 @@ impl Compiler {
 
         let exit_pos = self.current_fn().instructions.len();
         self.current_fn().instructions[jump_idx].a = exit_pos as u16;
+        for idx in &ctx.break_jumps {
+            self.current_fn().instructions[*idx].a = exit_pos as u16;
+        }
 
         Ok(())
     }
@@ -1037,7 +1126,14 @@ impl Compiler {
                 Ok(reg)
             }
             Expression::Match { value, arms } => self.compile_match(value, arms),
-            Expression::Range { .. } | Expression::MapLiteral(_) => {
+            Expression::Range { start, end } => {
+                let start_reg = self.compile_expression(start)?;
+                let end_reg = self.compile_expression(end)?;
+                let result = self.alloc_register();
+                self.emit_instr(Instruction::new(Opcode::MakeRange, result, start_reg, end_reg));
+                Ok(result)
+            }
+            Expression::MapLiteral(_) => {
                 let reg = self.alloc_register();
                 self.emit_instr(Instruction::a_only(Opcode::LoadNull, reg));
                 Ok(reg)
@@ -1142,5 +1238,88 @@ impl Compiler {
         }
 
         Ok(result_reg)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bumpalo::Bump;
+
+    fn try_compile_source(source: &str) -> Result<CompiledProgram, String> {
+        let arena = Bump::new();
+        let lexer = kinetix_language::lexer::Lexer::new(source);
+        let mut parser = kinetix_language::parser::Parser::new(lexer, &arena);
+        let ast = parser.parse_program();
+        assert!(parser.errors.is_empty(), "parse errors: {:?}", parser.errors);
+        let mut compiler = Compiler::new();
+        compiler.compile(&ast.statements, None).map(|p| p.clone())
+    }
+
+    fn compile_source(source: &str) -> CompiledProgram {
+        try_compile_source(source).expect("compile should succeed")
+    }
+
+    #[test]
+    fn test_range_compiles_to_make_range_not_load_null() {
+        let program = compile_source("let r = 0..5;");
+        assert!(
+            program.main.instructions.iter().any(|i| i.opcode == Opcode::MakeRange),
+            "Expression::Range should emit MakeRange, not fall through to the LoadNull stub"
+        );
+    }
+
+    #[test]
+    fn test_break_emits_jump_patched_to_loop_exit() {
+        let program = compile_source("mut i = 0\nwhile i < 10 {\n    break\n}\n");
+        let instrs = &program.main.instructions;
+        let halt_idx = instrs.len() - 1;
+        assert_eq!(instrs[halt_idx].opcode, Opcode::Halt);
+
+        let jumps: Vec<&Instruction> = instrs.iter().filter(|i| i.opcode == Opcode::Jump).collect();
+        assert_eq!(jumps.len(), 2, "expected the break's jump and the loop-back jump");
+        assert_eq!(
+            jumps[0].a as usize, halt_idx,
+            "break should be patched to the loop's exit point, right before Halt"
+        );
+    }
+
+    #[test]
+    fn test_continue_in_for_loop_targets_increment_not_condition() {
+        let program = compile_source("for x in [1, 2, 3] {\n    continue\n}\n");
+        let instrs = &program.main.instructions;
+        let jump_indices: Vec<usize> = instrs.iter().enumerate()
+            .filter(|(_, i)| i.opcode == Opcode::Jump)
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(jump_indices.len(), 2, "expected the continue's jump and the loop-back jump");
+
+        let continue_jump = &instrs[jump_indices[0]];
+        let loop_back_jump = &instrs[jump_indices[1]];
+        // continue must NOT target the condition check (that would skip the
+        // index increment and loop forever on the same element).
+        assert_ne!(
+            continue_jump.a, loop_back_jump.a,
+            "continue must not target the condition check (infinite loop bug)"
+        );
+        // continue's target should be the index increment, which sits strictly
+        // between the body (where `continue` was emitted) and the unconditional
+        // loop-back jump.
+        assert!(
+            continue_jump.a as usize > jump_indices[0] && continue_jump.a as usize <= jump_indices[1],
+            "continue should target the increment step, not jump backward or past the loop-back jump"
+        );
+    }
+
+    #[test]
+    fn test_break_outside_loop_is_compile_error() {
+        let result = try_compile_source("break\n");
+        assert!(result.is_err(), "bare top-level `break` should be a compile error");
+    }
+
+    #[test]
+    fn test_continue_outside_loop_is_compile_error() {
+        let result = try_compile_source("continue\n");
+        assert!(result.is_err(), "bare top-level `continue` should be a compile error");
     }
 }

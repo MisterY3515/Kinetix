@@ -1,0 +1,39 @@
+// test_break_continue.kix - real break/continue via loop_stack (Build 38 Phase A).
+// Before this fix `break`/`continue` were literal no-ops.
+
+// break stops a while loop at the right iteration
+mut i = 0
+while i < 100 {
+    if i == 5 {
+        break
+    }
+    i = i + 1
+}
+assert(i == 5)
+
+// continue in a for loop skips the right element without corrupting the index
+mut sum = 0
+for x in [1, 2, 3, 4, 5] {
+    if x == 3 {
+        continue
+    }
+    sum = sum + x
+}
+assert(sum == 12)
+
+// break only exits the innermost loop
+mut outer_count = 0
+mut inner_hits = 0
+for a in [1, 2, 3] {
+    outer_count = outer_count + 1
+    for b in [1, 2, 3] {
+        if b == 2 {
+            break
+        }
+        inner_hits = inner_hits + 1
+    }
+}
+assert(outer_count == 3)
+assert(inner_hits == 3)
+
+println("test_break_continue: OK")
