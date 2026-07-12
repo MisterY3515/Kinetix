@@ -11,8 +11,16 @@
 /// 5. **Reactive Isolation**: Reactive nodes (State, Computed, Effect) are structurally
 ///    excluded from canonical SSA to ensure pure imperative predictability.
 
-use crate::mir::{MirProgram, MirFunction, StatementKind, Operand, RValue, TerminatorKind};
+use crate::mir::{MirProgram, MirFunction, BasicBlockData, StatementKind, Operand, RValue, TerminatorKind};
 use std::collections::HashSet;
+
+fn successors(block: &BasicBlockData) -> Vec<usize> {
+    match block.terminator.as_ref().map(|t| &t.kind) {
+        Some(TerminatorKind::Goto(target)) => vec![target.0],
+        Some(TerminatorKind::Branch { then_block, else_block, .. }) => vec![then_block.0, else_block.0],
+        Some(TerminatorKind::Return) | None => vec![],
+    }
+}
 
 pub fn validate(program: &MirProgram) -> Result<(), String> {
     validate_function(&program.main_block)?;
@@ -52,29 +60,67 @@ fn check_reactive_isolation(_func: &MirFunction) -> Result<(), String> {
 
 /// Check that every LocalId used in an Operand has been assigned before use.
 ///
-/// We walk blocks linearly (sufficient for current single-block-per-function MIR structure)
-/// and track which locals have been assigned.
+/// Build 38 Phase B1: real definite-assignment dataflow. A local is only
+/// "definitely assigned" at a join point if it was assigned on *every*
+/// incoming path (an AND-join, the textbook definite-assignment lattice) --
+/// assigning it in only one branch of an `if` must not make it usable after
+/// the merge. This replaces the old declaration-order linear walk, which was
+/// only correct because every function used to have exactly one block.
 fn check_use_before_assign(func: &MirFunction) -> Result<(), String> {
-    let mut assigned: HashSet<usize> = HashSet::new();
+    if func.basic_blocks.is_empty() { return Ok(()); }
+    let n = func.basic_blocks.len();
 
-    // Function parameters are implicitly assigned at entry
+    let mut initial = vec![false; func.locals.len()];
     for arg_id in &func.args {
-        assigned.insert(arg_id.0);
+        initial[arg_id.0] = true;
     }
 
-    for (block_idx, block) in func.basic_blocks.iter().enumerate() {
+    let mut entry: Vec<Option<Vec<bool>>> = vec![None; n];
+    entry[0] = Some(initial);
+    let mut worklist = vec![0usize];
+    let mut queued = vec![false; n];
+    queued[0] = true;
+
+    while let Some(block_idx) = worklist.pop() {
+        queued[block_idx] = false;
+        let mut assigned = entry[block_idx].clone().expect("entry state set before a block is processed");
+        let block = &func.basic_blocks[block_idx];
+        for stmt in &block.statements {
+            if let StatementKind::Assign(place, _) = &stmt.kind {
+                assigned[place.local.0] = true;
+            }
+        }
+
+        for succ in successors(block) {
+            let merged = match &entry[succ] {
+                None => assigned.clone(),
+                Some(existing) => existing.iter().zip(assigned.iter()).map(|(&x, &y)| x && y).collect(),
+            };
+            if entry[succ].as_ref() != Some(&merged) {
+                entry[succ] = Some(merged);
+                if !queued[succ] {
+                    worklist.push(succ);
+                    queued[succ] = true;
+                }
+            }
+        }
+    }
+
+    // Final pass over every block using its converged entry state, reporting errors.
+    for block_idx in 0..n {
+        let mut assigned = entry[block_idx].clone().unwrap_or_else(|| vec![false; func.locals.len()]);
+        let block = &func.basic_blocks[block_idx];
         for (stmt_idx, stmt) in block.statements.iter().enumerate() {
             match &stmt.kind {
                 StatementKind::Assign(place, rvalue) => {
-                    // Check operands inside the rvalue before marking the place as assigned
                     check_rvalue_operands_assigned(rvalue, &assigned, &func.name, block_idx, stmt_idx)?;
-                    assigned.insert(place.local.0);
+                    assigned[place.local.0] = true;
                 }
                 StatementKind::Expression(rvalue) => {
                     check_rvalue_operands_assigned(rvalue, &assigned, &func.name, block_idx, stmt_idx)?;
                 }
                 StatementKind::Drop(place) => {
-                    if !assigned.contains(&place.local.0) {
+                    if !assigned[place.local.0] {
                         return Err(format!(
                             "MIR Integrity Error in '{}': Drop of unassigned local _{} at block {} stmt {}",
                             func.name, place.local.0, block_idx, stmt_idx
@@ -91,7 +137,7 @@ fn check_use_before_assign(func: &MirFunction) -> Result<(), String> {
 /// Helper: check that all operands in an RValue reference assigned locals.
 fn check_rvalue_operands_assigned(
     rvalue: &RValue,
-    assigned: &HashSet<usize>,
+    assigned: &[bool],
     fn_name: &str,
     block_idx: usize,
     stmt_idx: usize,
@@ -103,7 +149,7 @@ fn check_rvalue_operands_assigned(
             Operand::Constant(_) => None,
         };
         if let Some(p) = place {
-            if !assigned.contains(&p.local.0) {
+            if !assigned[p.local.0] {
                 return Err(format!(
                     "MIR Integrity Error in '{}': Use of unassigned local _{} at block {} stmt {}",
                     fn_name, p.local.0, block_idx, stmt_idx
@@ -146,6 +192,12 @@ fn check_return_terminator(func: &MirFunction) -> Result<(), String> {
                         // This is structurally acceptable.
                         Ok(())
                     }
+                    TerminatorKind::Branch { .. } => {
+                        // Same tolerance as Goto above: this check only looks at the
+                        // vector-order "last" block, so it can't confirm every arm of
+                        // the branch itself reaches a Return -- structurally acceptable.
+                        Ok(())
+                    }
                 }
             }
             None => {
@@ -165,6 +217,108 @@ fn check_return_terminator(func: &MirFunction) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mir::{BasicBlock, BasicBlockData, LocalDecl, LocalId, Mutability, MirStatement, Place, Terminator, Constant};
+    use crate::types::Type;
+
+    // Build 38 Phase B1: real definite-assignment dataflow. `local0` is assigned
+    // only on the `then` branch, not on `else`; reading it unconditionally after
+    // the merge must be rejected (an AND-join: assigned only if assigned on
+    // *every* incoming path).
+    #[test]
+    fn test_rejects_use_of_local_assigned_on_only_one_branch() {
+        let entry = BasicBlockData {
+            statements: vec![],
+            terminator: Some(Terminator {
+                kind: TerminatorKind::Branch {
+                    cond: Operand::Constant(Constant::Bool(true)),
+                    then_block: BasicBlock(1),
+                    else_block: BasicBlock(2),
+                },
+                line: 0,
+            }),
+        };
+        let then_block = BasicBlockData {
+            statements: vec![MirStatement {
+                kind: StatementKind::Assign(Place { local: LocalId(0) }, RValue::Use(Operand::Constant(Constant::Int(1)))),
+                line: 1,
+            }],
+            terminator: Some(Terminator { kind: TerminatorKind::Goto(BasicBlock(3)), line: 1 }),
+        };
+        let else_block = BasicBlockData {
+            statements: vec![],
+            terminator: Some(Terminator { kind: TerminatorKind::Goto(BasicBlock(3)), line: 2 }),
+        };
+        let merge_block = BasicBlockData {
+            statements: vec![MirStatement {
+                kind: StatementKind::Expression(RValue::Use(Operand::Copy(Place { local: LocalId(0) }))),
+                line: 3,
+            }],
+            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 3 }),
+        };
+
+        let f = MirFunction {
+            name: "mock".to_string(),
+            args: vec![],
+            return_ty: Type::Void,
+            locals: vec![LocalDecl { name: None, ty: Type::Int, mutability: Mutability::Not }],
+            basic_blocks: vec![entry, then_block, else_block, merge_block],
+        };
+
+        assert!(check_use_before_assign(&f).is_err());
+    }
+
+    // Mirror-image positive case: both branches assign `local0`, so it's
+    // definitely assigned at the merge -- must not be falsely rejected.
+    #[test]
+    fn test_accepts_use_of_local_assigned_on_both_branches() {
+        let entry = BasicBlockData {
+            statements: vec![],
+            terminator: Some(Terminator {
+                kind: TerminatorKind::Branch {
+                    cond: Operand::Constant(Constant::Bool(true)),
+                    then_block: BasicBlock(1),
+                    else_block: BasicBlock(2),
+                },
+                line: 0,
+            }),
+        };
+        let then_block = BasicBlockData {
+            statements: vec![MirStatement {
+                kind: StatementKind::Assign(Place { local: LocalId(0) }, RValue::Use(Operand::Constant(Constant::Int(1)))),
+                line: 1,
+            }],
+            terminator: Some(Terminator { kind: TerminatorKind::Goto(BasicBlock(3)), line: 1 }),
+        };
+        let else_block = BasicBlockData {
+            statements: vec![MirStatement {
+                kind: StatementKind::Assign(Place { local: LocalId(0) }, RValue::Use(Operand::Constant(Constant::Int(2)))),
+                line: 2,
+            }],
+            terminator: Some(Terminator { kind: TerminatorKind::Goto(BasicBlock(3)), line: 2 }),
+        };
+        let merge_block = BasicBlockData {
+            statements: vec![MirStatement {
+                kind: StatementKind::Expression(RValue::Use(Operand::Copy(Place { local: LocalId(0) }))),
+                line: 3,
+            }],
+            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 3 }),
+        };
+
+        let f = MirFunction {
+            name: "mock".to_string(),
+            args: vec![],
+            return_ty: Type::Void,
+            locals: vec![LocalDecl { name: None, ty: Type::Int, mutability: Mutability::Not }],
+            basic_blocks: vec![entry, then_block, else_block, merge_block],
+        };
+
+        assert!(check_use_before_assign(&f).is_ok());
+    }
+}
+
 /// Check that every block (except entry=0) is reachable from at least one Goto terminator.
 fn check_orphan_blocks(func: &MirFunction) -> Result<(), String> {
     if func.basic_blocks.len() <= 1 {
@@ -176,8 +330,15 @@ fn check_orphan_blocks(func: &MirFunction) -> Result<(), String> {
 
     for block in &func.basic_blocks {
         if let Some(term) = &block.terminator {
-            if let TerminatorKind::Goto(target) = &term.kind {
-                reachable.insert(target.0);
+            match &term.kind {
+                TerminatorKind::Goto(target) => {
+                    reachable.insert(target.0);
+                }
+                TerminatorKind::Branch { then_block, else_block, .. } => {
+                    reachable.insert(then_block.0);
+                    reachable.insert(else_block.0);
+                }
+                TerminatorKind::Return => {}
             }
         }
     }

@@ -98,6 +98,38 @@ fn validate_type_structure(ty: &Type) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bumpalo::Bump;
+    use kinetix_language::lexer::Lexer;
+    use kinetix_language::parser::Parser;
+    use crate::symbol::resolve_program;
+    use crate::hir::lower_to_hir;
+    use crate::typeck::TypeContext;
+    use crate::mir::lower_to_mir;
+
+    fn compile_to_mir(src: &str) -> MirProgram {
+        let arena = Bump::new();
+        let lexer = Lexer::new(src);
+        let mut parser = Parser::new(lexer, &arena);
+        let program = parser.parse_program();
+        let symbols = resolve_program(&program.statements).unwrap();
+        let traits = crate::trait_solver::TraitEnvironment::new();
+        let hir = lower_to_hir(&program.statements, &symbols, &traits);
+        let mut ctx = TypeContext::new();
+        let constraints = ctx.collect_constraints(&hir);
+        ctx.solve(&constraints).unwrap();
+        lower_to_mir(&hir, &ctx.substitution)
+    }
+
+    /// Build 38 Phase B1: confirms this pass's flat "all statements in all
+    /// blocks" iteration (it never inspects terminators or block order) really
+    /// does tolerate genuine multi-block MIR now that `if`/`while`/`for` lower
+    /// to real branches, instead of just assuming so.
+    #[test]
+    fn test_validate_tolerates_multi_block_mir() {
+        let mir = compile_to_mir("let x = 1\nif x > 0 { let y = 2 } else { let y = 3 }");
+        assert!(mir.main_block.basic_blocks.len() > 1, "expected multi-block MIR for an if/else");
+        assert!(validate(&mir).is_ok(), "post-mono validation should tolerate real multi-block MIR");
+    }
 
     #[test]
     fn test_valid_type_depth() {

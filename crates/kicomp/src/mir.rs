@@ -126,6 +126,12 @@ pub enum TerminatorKind {
     Return,
     /// Unconditional jump to a basic block.
     Goto(BasicBlock),
+    /// Conditional branch: jump to `then_block` if `cond` is truthy, else `else_block`.
+    Branch {
+        cond: Operand,
+        then_block: BasicBlock,
+        else_block: BasicBlock,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -189,6 +195,15 @@ pub fn is_trivially_copyable(ty: &Type) -> bool {
 use crate::types::Substitution;
 use std::collections::HashMap;
 
+/// Tracks the Goto targets for `break`/`continue` inside the loop currently
+/// being lowered (innermost last), mirroring `Compiler::loop_stack` in
+/// `compiler.rs` -- except MIR blocks are allocated up front, so no
+/// backpatching is needed: the targets are known before the body is lowered.
+struct MirLoopContext {
+    continue_target: BasicBlock,
+    break_target: BasicBlock,
+}
+
 pub struct MirBuilder<'a> {
     locals: Vec<LocalDecl>,
     basic_blocks: Vec<BasicBlockData>,
@@ -196,6 +211,7 @@ pub struct MirBuilder<'a> {
     local_env: HashMap<String, LocalId>,
     substitution: &'a Substitution,
     scopes: Vec<Vec<LocalId>>,
+    loop_stack: Vec<MirLoopContext>,
     pub functions: Vec<MirFunction>,
 }
 
@@ -209,6 +225,7 @@ impl<'a> MirBuilder<'a> {
             local_env: HashMap::new(),
             substitution,
             scopes: vec![vec![]], // the root function scope
+            loop_stack: vec![],
             functions: vec![],
         }
     }
@@ -230,18 +247,54 @@ impl<'a> MirBuilder<'a> {
         self.basic_blocks[self.current_block.0].statements.push(stmt);
     }
 
+    /// Allocates a new, empty basic block and returns its id. Does not switch
+    /// `current_block` -- callers do that explicitly once they're ready to lower
+    /// statements into it.
+    fn new_block(&mut self) -> BasicBlock {
+        let id = BasicBlock(self.basic_blocks.len());
+        self.basic_blocks.push(BasicBlockData { statements: vec![], terminator: None });
+        id
+    }
+
+    /// Sets `current_block`'s terminator, unless it already has one -- once a
+    /// block is terminated it stays terminated; later cleanup code (e.g. scope
+    /// drops on exit) may still append trailing statements after the terminator
+    /// is set, which is fine since `statements`/`terminator` are separate fields.
+    fn terminate_current(&mut self, kind: TerminatorKind, line: usize) {
+        let block = &mut self.basic_blocks[self.current_block.0];
+        if block.terminator.is_none() {
+            block.terminator = Some(Terminator { kind, line });
+        }
+    }
+
+    fn current_block_terminated(&self) -> bool {
+        self.basic_blocks[self.current_block.0].terminator.is_some()
+    }
+
+    /// Like `lower_expression_to_operand`, but for a bare local it borrows the
+    /// place instead of copying/moving it -- used where the caller only needs
+    /// to *read through* the value (e.g. indexing into an array) without
+    /// consuming it, so a second read later in the same scope isn't flagged
+    /// as a use of a moved value.
+    fn lower_expression_to_borrowed_operand(&mut self, expr: &HirExpression) -> Operand {
+        if let HirExprKind::Identifier(name) = &expr.kind {
+            if let Some(&local_id) = self.local_env.get(name) {
+                return Operand::Borrow(Place { local: local_id }, Mutability::Not);
+            }
+        }
+        self.lower_expression_to_operand(expr)
+    }
+
     pub fn build(mut self, hir: &HirProgram) -> (MirFunction, Vec<MirFunction>) {
         for stmt in &hir.statements {
+            if self.current_block_terminated() { break; }
             self.lower_statement(stmt);
         }
-        
+
         // Drop root scope variables before returning
         self.drop_current_scope(0); // 0 is line number for function exit
 
-        self.basic_blocks[self.current_block.0].terminator = Some(Terminator {
-            kind: TerminatorKind::Return,
-            line: 0,
-        });
+        self.terminate_current(TerminatorKind::Return, 0);
 
         let main_fn = MirFunction {
             name: "<main>".to_string(),
@@ -290,6 +343,7 @@ impl<'a> MirBuilder<'a> {
             HirStmtKind::Block { statements } => {
                 self.scopes.push(vec![]);
                 for s in statements {
+                    if self.current_block_terminated() { break; }
                     self.lower_statement(s);
                 }
                 self.drop_current_scope(stmt.line);
@@ -303,11 +357,8 @@ impl<'a> MirBuilder<'a> {
                 }
                 sub_builder.lower_statement(body);
                 sub_builder.drop_current_scope(stmt.line);
-                sub_builder.basic_blocks[sub_builder.current_block.0].terminator = Some(Terminator {
-                    kind: TerminatorKind::Return,
-                    line: stmt.line,
-                });
-                
+                sub_builder.terminate_current(TerminatorKind::Return, stmt.line);
+
                 let mir_fn = MirFunction {
                     name: name.clone(),
                     args: arg_ids,
@@ -324,9 +375,203 @@ impl<'a> MirBuilder<'a> {
                     self.lower_statement(m);
                 }
             }
-            // For Build 10, we'll implement a subset (Let, Expr, Block).
-            // Loops and Ifs will be expanded as needed.
-            _ => {}
+            HirStmtKind::While { condition, body } => {
+                let header = self.new_block();
+                self.terminate_current(TerminatorKind::Goto(header), stmt.line);
+                self.current_block = header;
+
+                let cond_op = self.lower_expression_to_operand(condition);
+                let body_block = self.new_block();
+                let exit_block = self.new_block();
+                self.terminate_current(
+                    TerminatorKind::Branch { cond: cond_op, then_block: body_block, else_block: exit_block },
+                    stmt.line,
+                );
+
+                self.current_block = body_block;
+                self.loop_stack.push(MirLoopContext { continue_target: header, break_target: exit_block });
+                self.lower_statement(body);
+                self.loop_stack.pop();
+                if !self.current_block_terminated() {
+                    self.terminate_current(TerminatorKind::Goto(header), stmt.line);
+                }
+
+                self.current_block = exit_block;
+            }
+            HirStmtKind::For { iterator, range, body } => {
+                // Evaluate the iterable once into a temp place (borrowed, not moved,
+                // so it can still be indexed on every iteration below).
+                let iter_ty = range.ty.clone();
+                let iter_local = self.push_local(None, iter_ty, Mutability::Not);
+                let iter_place = Place { local: iter_local };
+                let range_rvalue = self.lower_expression_to_rvalue(range);
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(iter_place.clone(), range_rvalue),
+                    line: stmt.line,
+                });
+
+                let idx_local = self.push_local(None, Type::Int, Mutability::Mut);
+                let idx_place = Place { local: idx_local };
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(idx_place.clone(), RValue::Use(Operand::Constant(Constant::Int(0)))),
+                    line: stmt.line,
+                });
+
+                // len(iter) -- modeled the same way any other unresolved builtin call
+                // lowers in this MIR today (see `HirExprKind::Identifier`'s fallback);
+                // MIR doesn't resolve global/builtin functions, only local bindings.
+                let len_local = self.push_local(None, Type::Int, Mutability::Not);
+                let len_place = Place { local: len_local };
+                let len_call = RValue::Call(
+                    Operand::Constant(Constant::Null),
+                    vec![Operand::Borrow(iter_place.clone(), Mutability::Not)],
+                );
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(len_place.clone(), len_call),
+                    line: stmt.line,
+                });
+
+                let header = self.new_block();
+                self.terminate_current(TerminatorKind::Goto(header), stmt.line);
+                self.current_block = header;
+
+                let cond_local = self.push_local(None, Type::Bool, Mutability::Not);
+                let cond_place = Place { local: cond_local };
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(
+                        cond_place.clone(),
+                        RValue::BinaryOp("<".to_string(), Operand::Copy(idx_place.clone()), Operand::Copy(len_place.clone())),
+                    ),
+                    line: stmt.line,
+                });
+
+                let body_block = self.new_block();
+                let exit_block = self.new_block();
+                self.terminate_current(
+                    TerminatorKind::Branch { cond: Operand::Copy(cond_place), then_block: body_block, else_block: exit_block },
+                    stmt.line,
+                );
+
+                self.current_block = body_block;
+                // iterator := iter[idx] -- shadow-safe: save/restore any previous
+                // binding for this name so a same-named outer local isn't leaked
+                // past the loop (mirrors the compiler.rs Phase A scope-leak fix).
+                let iter_var_local = self.push_local(Some(iterator.clone()), Type::Int, Mutability::Not);
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(
+                        Place { local: iter_var_local },
+                        RValue::BinaryOp("[]".to_string(), Operand::Borrow(iter_place.clone(), Mutability::Not), Operand::Copy(idx_place.clone())),
+                    ),
+                    line: stmt.line,
+                });
+
+                let increment_block = self.new_block();
+                self.loop_stack.push(MirLoopContext { continue_target: increment_block, break_target: exit_block });
+                self.lower_statement(body);
+                self.loop_stack.pop();
+                if !self.current_block_terminated() {
+                    self.terminate_current(TerminatorKind::Goto(increment_block), stmt.line);
+                }
+
+                self.current_block = increment_block;
+                self.push_statement(MirStatement {
+                    kind: StatementKind::Assign(
+                        idx_place.clone(),
+                        RValue::BinaryOp("+".to_string(), Operand::Copy(idx_place.clone()), Operand::Constant(Constant::Int(1))),
+                    ),
+                    line: stmt.line,
+                });
+                self.terminate_current(TerminatorKind::Goto(header), stmt.line);
+
+                self.current_block = exit_block;
+            }
+            HirStmtKind::Break => {
+                // A `break`/`continue` outside any loop is a real error, but it's
+                // already caught at the bytecode-codegen layer (`compiler.rs`'s own
+                // `loop_stack` check), which runs independently over the same AST --
+                // no need to duplicate that check in this (validation-only) MIR pass.
+                if let Some(ctx) = self.loop_stack.last() {
+                    let target = ctx.break_target;
+                    self.terminate_current(TerminatorKind::Goto(target), stmt.line);
+                }
+            }
+            HirStmtKind::Continue => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    let target = ctx.continue_target;
+                    self.terminate_current(TerminatorKind::Goto(target), stmt.line);
+                }
+            }
+            HirStmtKind::Return { value } => {
+                if let Some(val_expr) = value {
+                    // Evaluate the returned expression so borrowck/ssa_validate see
+                    // its operands as used at the return point.
+                    let _ = self.lower_expression_to_operand(val_expr);
+                }
+                self.terminate_current(TerminatorKind::Return, stmt.line);
+            }
+            // State/Computed/Effect are intentionally not lowered into MIR at all
+            // (see `check_reactive_isolation` in ssa_validate.rs).
+            HirStmtKind::State { .. } | HirStmtKind::Computed { .. } | HirStmtKind::Effect { .. } => {}
+        }
+    }
+
+    /// Lowers `stmt` the same way `lower_statement` does, except that if it is
+    /// (or ends in) a trailing `Expression` statement, that expression's value is
+    /// assigned into `result_place` instead of being discarded. Used to give
+    /// if-expressions (`let x = if cond { 1 } else { 2 }`) a real value instead of
+    /// the previous `Null` placeholder.
+    fn lower_statement_as_value(&mut self, stmt: &HirStatement, result_place: Option<&Place>) {
+        match &stmt.kind {
+            HirStmtKind::Block { statements } => {
+                self.scopes.push(vec![]);
+                if let Some((last, rest)) = statements.split_last() {
+                    for s in rest {
+                        if self.current_block_terminated() { break; }
+                        self.lower_statement(s);
+                    }
+                    if !self.current_block_terminated() {
+                        self.lower_statement_as_value(last, result_place);
+                    }
+                }
+                self.drop_current_scope(stmt.line);
+            }
+            HirStmtKind::Expression { expression } => {
+                let rvalue = self.lower_expression_to_rvalue(expression);
+                match result_place {
+                    Some(place) => {
+                        self.push_statement(MirStatement {
+                            kind: StatementKind::Assign(place.clone(), rvalue),
+                            line: stmt.line,
+                        });
+                    }
+                    None => {
+                        self.push_statement(MirStatement { kind: StatementKind::Expression(rvalue), line: stmt.line });
+                    }
+                }
+            }
+            HirStmtKind::Let { name, .. } => {
+                // This HIR types a `Block` as its *last statement's* type regardless
+                // of kind (see `hir.rs`'s `Statement::Block` lowering), so a trailing
+                // `let` also counts as "the block's value" here, not just a trailing
+                // expression. Lower the binding normally, then additionally propagate
+                // the freshly-bound local's value into `result_place`.
+                self.lower_statement(stmt);
+                if let Some(place) = result_place {
+                    if let Some(&local_id) = self.local_env.get(name) {
+                        let local_ty = self.locals[local_id.0].ty.clone();
+                        let operand = if is_trivially_copyable(&local_ty) {
+                            Operand::Copy(Place { local: local_id })
+                        } else {
+                            Operand::Move(Place { local: local_id })
+                        };
+                        self.push_statement(MirStatement {
+                            kind: StatementKind::Assign(place.clone(), RValue::Use(operand)),
+                            line: stmt.line,
+                        });
+                    }
+                }
+            }
+            _ => self.lower_statement(stmt),
         }
     }
 
@@ -397,6 +642,73 @@ impl<'a> MirBuilder<'a> {
             }
             HirExprKind::MethodCall { .. } => {
                 unreachable!("MethodCall should have been statically dispatched to Call in Type Normalizer.");
+            }
+            HirExprKind::If { condition, consequence, alternative } => {
+                let cond_op = self.lower_expression_to_operand(condition);
+                let result_ty = self.substitution.apply_default(&expr.ty);
+                let result_place = if result_ty == Type::Void {
+                    None
+                } else {
+                    Some(Place { local: self.push_local(None, expr.ty.clone(), Mutability::Not) })
+                };
+
+                let then_block = self.new_block();
+                let else_block = self.new_block();
+                let merge_block = self.new_block();
+                self.terminate_current(
+                    TerminatorKind::Branch { cond: cond_op, then_block, else_block },
+                    0,
+                );
+
+                self.current_block = then_block;
+                self.lower_statement_as_value(consequence, result_place.as_ref());
+                if !self.current_block_terminated() {
+                    self.terminate_current(TerminatorKind::Goto(merge_block), 0);
+                }
+
+                self.current_block = else_block;
+                if let Some(alt) = alternative {
+                    self.lower_statement_as_value(alt, result_place.as_ref());
+                }
+                if !self.current_block_terminated() {
+                    self.terminate_current(TerminatorKind::Goto(merge_block), 0);
+                }
+
+                self.current_block = merge_block;
+
+                match result_place {
+                    Some(place) => {
+                        if is_trivially_copyable(&result_ty) {
+                            RValue::Use(Operand::Copy(place))
+                        } else {
+                            RValue::Use(Operand::Move(place))
+                        }
+                    }
+                    None => RValue::Use(Operand::Constant(Constant::Null)),
+                }
+            }
+            HirExprKind::Index { left, index } => {
+                let l_op = self.lower_expression_to_borrowed_operand(left);
+                let i_op = self.lower_expression_to_operand(index);
+                RValue::BinaryOp("[]".to_string(), l_op, i_op)
+            }
+            HirExprKind::Assign { target, value } => {
+                // Only simple identifier targets are modeled (the common `x = x + 1`
+                // loop-body reassignment pattern); complex targets (`arr[i] = v`,
+                // `obj.field = v`) fall through to the existing Null placeholder below,
+                // same as before this change.
+                if let HirExprKind::Identifier(name) = &target.kind {
+                    if let Some(&local_id) = self.local_env.get(name) {
+                        let place = Place { local: local_id };
+                        let rvalue = self.lower_expression_to_rvalue(value);
+                        self.push_statement(MirStatement {
+                            kind: StatementKind::Assign(place, rvalue),
+                            line: 0,
+                        });
+                        return RValue::Use(Operand::Constant(Constant::Null));
+                    }
+                }
+                RValue::Use(Operand::Constant(Constant::Null))
             }
             _ => RValue::Use(Operand::Constant(Constant::Null)), // placeholder for Match, MemberAccess, etc.
         }
@@ -518,5 +830,54 @@ mod tests {
         }
         
         assert!(found_drop, "Expected a Drop statement at the end of the block for the string variable");
+    }
+
+    // ── Build 38 Phase B1: real multi-block CFG lowering ──────────────────
+
+    #[test]
+    fn test_mir_if_produces_multiple_blocks_and_branch_terminator() {
+        let mir = compile_to_mir("let x = 1\nif x > 0 {\n    let y = 1\n} else {\n    let y = 2\n}");
+        assert!(mir.main_block.basic_blocks.len() > 1, "expected more than one block for an if/else");
+        let has_branch = mir.main_block.basic_blocks.iter().any(|b| {
+            matches!(b.terminator.as_ref().map(|t| &t.kind), Some(TerminatorKind::Branch { .. }))
+        });
+        assert!(has_branch, "expected a Branch terminator for the if/else condition");
+    }
+
+    #[test]
+    fn test_mir_if_expression_yields_real_value_not_null_placeholder() {
+        // Previously any if-expression lowered to a bare `Null` placeholder RValue;
+        // now it should produce a real value via a result place assigned in both arms.
+        let mir = compile_to_mir("let x = 1\nlet z = if x > 0 { 1 } else { 2 }");
+        assert!(mir.main_block.basic_blocks.len() > 1);
+        assert!(crate::borrowck::check_mir(&mir).is_ok());
+        assert!(crate::ssa_validate::validate(&mir).is_ok());
+    }
+
+    #[test]
+    fn test_mir_while_produces_header_body_exit_blocks() {
+        let mir = compile_to_mir("mut x = 3\nwhile x > 0 {\n    x = x - 1\n}");
+        assert!(mir.main_block.basic_blocks.len() >= 3, "expected at least header/body/exit blocks");
+        let has_branch = mir.main_block.basic_blocks.iter().any(|b| {
+            matches!(b.terminator.as_ref().map(|t| &t.kind), Some(TerminatorKind::Branch { .. }))
+        });
+        assert!(has_branch);
+    }
+
+    #[test]
+    fn test_mir_for_loop_produces_blocks() {
+        let mir = compile_to_mir("for i in 0..3 {\n    let y = i\n}");
+        assert!(mir.main_block.basic_blocks.len() >= 3);
+    }
+
+    #[test]
+    fn test_mir_nested_break_continue_passes_all_validators() {
+        let mir = compile_to_mir(
+            "for i in 0..5 {\n    if i > 2 {\n        break\n    }\n    if i > 1 {\n        continue\n    }\n}"
+        );
+        assert!(crate::borrowck::check_mir(&mir).is_ok());
+        assert!(crate::ssa_validate::validate(&mir).is_ok());
+        assert!(crate::drop_verify::verify(&mir).is_ok());
+        assert!(crate::mono_validate::validate(&mir).is_ok());
     }
 }
