@@ -21,6 +21,12 @@ pub struct Parser<'src, 'arena> {
     pub arena: &'arena Bump,
     cur_token: Token,
     peek_token: Token,
+    // Line numbers tracked in lockstep with cur_token/peek_token. `self.lexer.line`
+    // always reflects the scanner's position just after producing peek_token, NOT
+    // cur_token -- code that needs "the line the current token is on" (e.g. the
+    // Holy-Shell same-line check below) must use `cur_line`, not `self.lexer.line`.
+    cur_line: usize,
+    peek_line: usize,
     pub errors: Vec<String>,
     allow_struct_literal: bool,
     peek_space_before: bool,
@@ -33,6 +39,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
             arena,
             cur_token: Token::EOF,
             peek_token: Token::EOF,
+            cur_line: 1,
+            peek_line: 1,
             errors: vec![],
             allow_struct_literal: true,
             peek_space_before: false,
@@ -44,7 +52,9 @@ impl<'src, 'arena> Parser<'src, 'arena> {
 
     pub fn next_token(&mut self) {
         self.cur_token = self.peek_token.clone();
+        self.cur_line = self.peek_line;
         self.peek_token = self.lexer.next_token();
+        self.peek_line = self.lexer.line;
         self.peek_space_before = self.lexer.space_before_current();
     }
 
@@ -846,47 +856,44 @@ impl<'src, 'arena> Parser<'src, 'arena> {
         if allow_holy && precedence <= Precedence::Lowest {
             if let Expression::Identifier(_) | Expression::MemberAccess { .. } = &left {
                 // Check if the current peek_token is a token that can start a primary expression
-                // and it is on the SAME line as the identifier/member access.
-                // We don't have exact line numbers for the peek token easily without checking
-                // the lexer's state. But we know `cur_token` line is `self.lexer.line`.
-                // If there's no newline between `self.cur_token` and `self.peek_token`, then `self.lexer.line`
-                // should be the same as the line where the expression started.
-                // We'll approximate: we parse arguments until a newline or a delimiter token.
-                
+                // and it is on the SAME line as the identifier/member access. `cur_line` is the
+                // line of `left`'s own token (the parser always looks one token ahead, so
+                // `self.lexer.line` reflects peek_token's line, not cur_token's -- using it here
+                // as "the line the call started on" previously let a bare identifier on one line
+                // fuse with an unrelated statement starting on the next).
                 let is_arg_starter = match &self.peek_token {
-                    Token::Identifier(_) | Token::Integer(_) | Token::Float(_) | 
-                    Token::String(_) | Token::BacktickString(_) | Token::True | 
+                    Token::Identifier(_) | Token::Integer(_) | Token::Float(_) |
+                    Token::String(_) | Token::BacktickString(_) | Token::True |
                     Token::False | Token::Null | Token::LBracket | Token::Minus | Token::Bang => true,
                     _ => false,
                 };
 
-                // The lexer.line changes strictly when \n is consumed by read_char().
-                // To be truly Holy-shell, we'd need to trace line numbers per token. We'll use a heuristic:
-                // If it looks like an argument starter, consume it as arguments unless it hits Semicolon or RBrace.
+                // If it looks like an argument starter, consume it as arguments unless it hits
+                // Semicolon, RBrace, or a new line.
                 if is_arg_starter {
                     let mut args = vec![];
-                    
-                    let call_line = self.lexer.line; // The line we started parsing this function call.
-                    
+
+                    let call_line = self.cur_line; // The line `left`'s own token is on.
+
                     while match &self.peek_token {
-                        Token::Identifier(_) | Token::Integer(_) | Token::Float(_) | 
-                        Token::String(_) | Token::BacktickString(_) | Token::True | 
+                        Token::Identifier(_) | Token::Integer(_) | Token::Float(_) |
+                        Token::String(_) | Token::BacktickString(_) | Token::True |
                         Token::False | Token::Null | Token::LBracket | Token::Minus | Token::Bang => true,
                         // Allow unary expressions as arguments
                         _ => false,
                     } {
-                        if self.lexer.line > call_line {
+                        if self.peek_line > call_line {
                             // The next token is on a new line, stop parsing arguments without parens.
                             break;
                         }
-                        
+
                         self.next_token();
                         if let Some(arg) = self.parse_expression(Precedence::Lowest, false) {
                             args.push(arg);
                         } else {
                             break;
                         }
-                        
+
                         // In Holy-Shell style, arguments are space-separated or comma-separated.
                         // Wait, `parse_expression` will consume everything up to a precedence boundary.
                         // Commas have lowest precedence, so `parse_expression` stops at a comma.
@@ -895,8 +902,8 @@ impl<'src, 'arena> Parser<'src, 'arena> {
                         if self.peek_token == Token::Comma {
                             self.next_token();
                         }
-                        
-                        if self.lexer.line > call_line {
+
+                        if self.peek_line > call_line {
                             break;
                         }
                     }

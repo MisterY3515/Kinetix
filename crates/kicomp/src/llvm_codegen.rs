@@ -420,17 +420,48 @@ impl<'ctx> LLVMCodegen<'ctx> {
         }
     }
 
-    fn compile_print(&self, args: &[Expression], is_ln: bool) -> Result<BasicValueEnum<'ctx>, String> {
+    fn compile_print(&mut self, args: &[Expression], is_ln: bool) -> Result<BasicValueEnum<'ctx>, String> {
          let printf_fn = self.module.get_function("printf").unwrap();
-         
-         // Build format string
-         // For now, support one arg. Muti-arg requires concat or multiple calls.
-         // MVP: only first arg.
-         
-         // This is tricky. printf expects C-types.
-         // Let's implement minimal logic: if Int -> %ld, Float -> %f, String -> %s
-         
-         // Just a placeholder implementation for now
+
+         // MVP: only the first argument is printed -- multi-arg print needs
+         // string concatenation across mixed types, out of scope for this fix.
+         // Newline behavior matches the bytecode VM (crates/kivm/src/builtins.rs),
+         // which always appends one for both `print` and `println`, per the
+         // "VM <-> LLVM equivalence" invariant.
+         let mut printf_args: Vec<inkwell::values::BasicMetadataValueEnum> = Vec::new();
+         let fmt = match args.first() {
+             None => String::new(),
+             Some(expr) => {
+                 let val = self.compile_expression(expr)?;
+                 if val.is_int_value() {
+                     printf_args.push(val.into());
+                     "%ld".to_string()
+                 } else if val.is_float_value() {
+                     printf_args.push(val.into());
+                     "%f".to_string()
+                 } else if val.is_struct_value() && val.into_struct_value().get_type() == self.context.get_struct_type("String").unwrap() {
+                     // Kinetix string: { i64 len, i8* ptr } (see Expression::String
+                     // codegen above) -- printf only needs the pointer field. Struct
+                     // *type* must be checked explicitly: `Array` is also a struct
+                     // ({ i64 len, i64 cap, i64* data }) but its field 1 is an i64,
+                     // not a pointer -- extracting it as if it were the String's
+                     // pointer field previously segfaulted at runtime.
+                     let ptr = self.builder.build_extract_value(val.into_struct_value(), 1, "str_ptr")
+                         .map_err(|e| e.to_string())?;
+                     printf_args.push(ptr.into());
+                     "%s".to_string()
+                 } else {
+                     return Err("print: argument type not supported by the native LLVM backend (expected int, float, or string)".to_string());
+                 }
+             }
+         };
+         let full_fmt = if is_ln { format!("{}\n", fmt) } else { fmt };
+         let fmt_ptr = self.builder.build_global_string_ptr(&full_fmt, "fmt_str").map_err(|e| e.to_string())?;
+
+         let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum> = vec![fmt_ptr.as_pointer_value().into()];
+         call_args.extend(printf_args);
+         self.builder.build_call(printf_fn, &call_args, "printf_call").map_err(|e| e.to_string())?;
+
          Ok(self.context.i32_type().const_int(0, false).into())
     }
 

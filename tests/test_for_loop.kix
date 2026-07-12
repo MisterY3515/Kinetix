@@ -33,12 +33,7 @@ let arr = [100, 200, 300]
 mut seen = [0, 0, 0]
 mut i = 0
 for v in arr {
-    // The trailing `;` matters here: without it, the parser's Holy-Shell
-    // implicit-call heuristic (crates/language/src/parser/mod.rs) can
-    // misjudge a bare-identifier assignment RHS followed by another
-    // statement on the next line as a call `v(i = i + 1)` -- a pre-existing
-    // parser quirk unrelated to Build 38 Phase A, out of scope to fix here.
-    seen[i] = v;
+    seen[i] = v
     i = i + 1
 }
 assert((seen[0] == 100) && (seen[1] == 200) && (seen[2] == 300))
