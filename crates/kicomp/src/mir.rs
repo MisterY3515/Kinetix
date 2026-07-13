@@ -122,8 +122,13 @@ pub struct MirStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TerminatorKind {
-    /// Return from the function.
-    Return,
+    /// Return from the function, with the value being returned (if any). The
+    /// validators (borrowck/drop_verify/ssa_validate) never needed this payload
+    /// in Phase B1 -- they only cared about the returned expression being
+    /// evaluated as a *use* beforehand -- but Phase B2's MIR-consuming codegen
+    /// needs to know which register/operand to actually emit as the return
+    /// value, so it's carried here instead of being discarded.
+    Return(Option<Operand>),
     /// Unconditional jump to a basic block.
     Goto(BasicBlock),
     /// Conditional branch: jump to `then_block` if `cond` is truthy, else `else_block`.
@@ -294,7 +299,7 @@ impl<'a> MirBuilder<'a> {
         // Drop root scope variables before returning
         self.drop_current_scope(0); // 0 is line number for function exit
 
-        self.terminate_current(TerminatorKind::Return, 0);
+        self.terminate_current(TerminatorKind::Return(None), 0);
 
         let main_fn = MirFunction {
             name: "<main>".to_string(),
@@ -357,7 +362,7 @@ impl<'a> MirBuilder<'a> {
                 }
                 sub_builder.lower_statement(body);
                 sub_builder.drop_current_scope(stmt.line);
-                sub_builder.terminate_current(TerminatorKind::Return, stmt.line);
+                sub_builder.terminate_current(TerminatorKind::Return(None), stmt.line);
 
                 let mir_fn = MirFunction {
                     name: name.clone(),
@@ -418,12 +423,12 @@ impl<'a> MirBuilder<'a> {
                 });
 
                 // len(iter) -- modeled the same way any other unresolved builtin call
-                // lowers in this MIR today (see `HirExprKind::Identifier`'s fallback);
-                // MIR doesn't resolve global/builtin functions, only local bindings.
+                // lowers in this MIR today (see `HirExprKind::Identifier`'s fallback):
+                // the callee is an unresolved global, carried as a name string.
                 let len_local = self.push_local(None, Type::Int, Mutability::Not);
                 let len_place = Place { local: len_local };
                 let len_call = RValue::Call(
-                    Operand::Constant(Constant::Null),
+                    Operand::Constant(Constant::String("len".to_string())),
                     vec![Operand::Borrow(iter_place.clone(), Mutability::Not)],
                 );
                 self.push_statement(MirStatement {
@@ -502,12 +507,8 @@ impl<'a> MirBuilder<'a> {
                 }
             }
             HirStmtKind::Return { value } => {
-                if let Some(val_expr) = value {
-                    // Evaluate the returned expression so borrowck/ssa_validate see
-                    // its operands as used at the return point.
-                    let _ = self.lower_expression_to_operand(val_expr);
-                }
-                self.terminate_current(TerminatorKind::Return, stmt.line);
+                let ret_operand = value.as_ref().map(|val_expr| self.lower_expression_to_operand(val_expr));
+                self.terminate_current(TerminatorKind::Return(ret_operand), stmt.line);
             }
             // State/Computed/Effect are intentionally not lowered into MIR at all
             // (see `check_reactive_isolation` in ssa_validate.rs).
@@ -593,8 +594,16 @@ impl<'a> MirBuilder<'a> {
                         RValue::Use(Operand::Move(place))
                     }
                 } else {
-                    // Fallback for unresolved globals (builtins)
-                    RValue::Use(Operand::Constant(Constant::Null))
+                    // Unresolved global (a top-level function name or a builtin like
+                    // `len`) -- MIR doesn't track a symbol table for these, so the
+                    // name itself is carried through as a string constant. This is
+                    // the same convention `monomorphize.rs`'s `monomorphize_rvalue`
+                    // already expects a `Call`'s function operand to use (see its
+                    // `Operand::Constant(Constant::String(func_name))` match), just
+                    // not previously produced by this lowering. Codegen resolves it
+                    // via `GetGlobal` by name instead of the AST-walking compiler's
+                    // symbol-table lookup.
+                    RValue::Use(Operand::Constant(Constant::String(name.clone())))
                 }
             }
             HirExprKind::Infix { left, operator, right } => {
@@ -667,8 +676,26 @@ impl<'a> MirBuilder<'a> {
                 }
 
                 self.current_block = else_block;
-                if let Some(alt) = alternative {
-                    self.lower_statement_as_value(alt, result_place.as_ref());
+                match alternative {
+                    Some(alt) => self.lower_statement_as_value(alt, result_place.as_ref()),
+                    None => {
+                        // No `else` -- this branch implicitly produces nothing. If
+                        // `result_place` is `Some` here, the *then* branch must
+                        // diverge (HIR only types a non-Void if-without-else when
+                        // the true branch never falls through, e.g.
+                        // `if cond { return x }`), so this value is never actually
+                        // read on any live path -- but the merge block below
+                        // unconditionally reads `result_place`, so it must still be
+                        // initialized to *something* here or the borrow checker
+                        // correctly (but spuriously, from the source program's
+                        // point of view) flags it as read-before-init.
+                        if let Some(place) = &result_place {
+                            self.push_statement(MirStatement {
+                                kind: StatementKind::Assign(place.clone(), RValue::Use(Operand::Constant(Constant::Null))),
+                                line: 0,
+                            });
+                        }
+                    }
                 }
                 if !self.current_block_terminated() {
                     self.terminate_current(TerminatorKind::Goto(merge_block), 0);
@@ -691,6 +718,17 @@ impl<'a> MirBuilder<'a> {
                 let l_op = self.lower_expression_to_borrowed_operand(left);
                 let i_op = self.lower_expression_to_operand(index);
                 RValue::BinaryOp("[]".to_string(), l_op, i_op)
+            }
+            HirExprKind::Range { start, end } => {
+                // Same convention as `"[]"` above: reuses `BinaryOp` with an
+                // operator tag that doesn't correspond to a source-level infix
+                // operator, rather than adding a dedicated RValue variant just
+                // for this one construct. `for x in a..b` (the only place a
+                // range is used in MIR-representable code today) evaluates this
+                // once into a place it then indexes into every iteration.
+                let s_op = self.lower_expression_to_operand(start);
+                let e_op = self.lower_expression_to_operand(end);
+                RValue::BinaryOp("..".to_string(), s_op, e_op)
             }
             HirExprKind::Assign { target, value } => {
                 // Only simple identifier targets are modeled (the common `x = x + 1`
@@ -879,5 +917,33 @@ mod tests {
         assert!(crate::ssa_validate::validate(&mir).is_ok());
         assert!(crate::drop_verify::verify(&mir).is_ok());
         assert!(crate::mono_validate::validate(&mir).is_ok());
+    }
+
+    // A call to a name MIR can't resolve locally (a top-level function or a
+    // builtin) must keep the callee's name so codegen can later emit a
+    // GetGlobal for it -- previously this collapsed to `Constant::Null`,
+    // silently destroying the callee's identity.
+    #[test]
+    fn test_mir_call_to_unresolved_global_carries_name_not_null() {
+        let mir = compile_to_mir("fn foo(x: int) -> int { return x }\nlet y = foo(1)");
+        let has_named_callee = mir.main_block.basic_blocks.iter().any(|b| {
+            b.statements.iter().any(|s| matches!(
+                &s.kind,
+                StatementKind::Assign(_, RValue::Use(Operand::Constant(Constant::String(name)))) if name == "foo"
+            ))
+        });
+        assert!(has_named_callee, "callee name 'foo' should survive MIR lowering as a string constant");
+    }
+
+    #[test]
+    fn test_mir_for_loop_len_call_carries_name_not_null() {
+        let mir = compile_to_mir("for i in 0..3 {\n    let y = i\n}");
+        let has_len_callee = mir.main_block.basic_blocks.iter().any(|b| {
+            b.statements.iter().any(|s| matches!(
+                &s.kind,
+                StatementKind::Assign(_, RValue::Call(Operand::Constant(Constant::String(name)), _)) if name == "len"
+            ))
+        });
+        assert!(has_len_callee, "the for-loop's implicit len() bounds check should carry its callee name");
     }
 }

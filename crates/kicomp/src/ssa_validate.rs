@@ -18,7 +18,7 @@ fn successors(block: &BasicBlockData) -> Vec<usize> {
     match block.terminator.as_ref().map(|t| &t.kind) {
         Some(TerminatorKind::Goto(target)) => vec![target.0],
         Some(TerminatorKind::Branch { then_block, else_block, .. }) => vec![then_block.0, else_block.0],
-        Some(TerminatorKind::Return) | None => vec![],
+        Some(TerminatorKind::Return(_)) | None => vec![],
     }
 }
 
@@ -186,7 +186,7 @@ fn check_return_terminator(func: &MirFunction) -> Result<(), String> {
         match &last_block.terminator {
             Some(term) => {
                 match &term.kind {
-                    TerminatorKind::Return => Ok(()),
+                    TerminatorKind::Return(_) => Ok(()),
                     TerminatorKind::Goto(_) => {
                         // Loops or branches may end their last block with Goto.
                         // This is structurally acceptable.
@@ -256,7 +256,7 @@ mod tests {
                 kind: StatementKind::Expression(RValue::Use(Operand::Copy(Place { local: LocalId(0) }))),
                 line: 3,
             }],
-            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 3 }),
+            terminator: Some(Terminator { kind: TerminatorKind::Return(None), line: 3 }),
         };
 
         let f = MirFunction {
@@ -304,7 +304,7 @@ mod tests {
                 kind: StatementKind::Expression(RValue::Use(Operand::Copy(Place { local: LocalId(0) }))),
                 line: 3,
             }],
-            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 3 }),
+            terminator: Some(Terminator { kind: TerminatorKind::Return(None), line: 3 }),
         };
 
         let f = MirFunction {
@@ -338,7 +338,7 @@ fn check_orphan_blocks(func: &MirFunction) -> Result<(), String> {
                     reachable.insert(then_block.0);
                     reachable.insert(else_block.0);
                 }
-                TerminatorKind::Return => {}
+                TerminatorKind::Return(_) => {}
             }
         }
     }

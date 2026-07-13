@@ -34,7 +34,7 @@ fn successors(block: &BasicBlockData) -> Vec<usize> {
     match block.terminator.as_ref().map(|t| &t.kind) {
         Some(TerminatorKind::Goto(target)) => vec![target.0],
         Some(TerminatorKind::Branch { then_block, else_block, .. }) => vec![then_block.0, else_block.0],
-        Some(TerminatorKind::Return) | None => vec![],
+        Some(TerminatorKind::Return(_)) | None => vec![],
     }
 }
 
@@ -198,7 +198,7 @@ mod tests {
         };
         let block1 = BasicBlockData {
             statements: vec![MirStatement { kind: StatementKind::Drop(Place { local: LocalId(0) }), line: 1 }],
-            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 1 }),
+            terminator: Some(Terminator { kind: TerminatorKind::Return(None), line: 1 }),
         };
 
         let f = MirFunction {
@@ -240,7 +240,7 @@ mod tests {
         };
         let merge_block = BasicBlockData {
             statements: vec![],
-            terminator: Some(Terminator { kind: TerminatorKind::Return, line: 3 }),
+            terminator: Some(Terminator { kind: TerminatorKind::Return(None), line: 3 }),
         };
 
         let f = MirFunction {

@@ -2341,10 +2341,12 @@ dependencies = [
 name = "kinetix-kivm"
 version = "0.0.9"
 dependencies = [
+ "bumpalo",
  "csv",
  "hex",
  "hmac",
  "kinetix-kicomp",
+ "kinetix-language",
  "lazy_static",
  "minifb",
  "rand 0.8.5",

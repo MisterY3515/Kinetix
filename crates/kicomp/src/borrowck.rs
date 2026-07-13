@@ -48,7 +48,7 @@ impl BorrowChecker {
         match block.terminator.as_ref().map(|t| &t.kind) {
             Some(TerminatorKind::Goto(target)) => vec![target.0],
             Some(TerminatorKind::Branch { then_block, else_block, .. }) => vec![then_block.0, else_block.0],
-            Some(TerminatorKind::Return) | None => vec![],
+            Some(TerminatorKind::Return(_)) | None => vec![],
         }
     }
 
